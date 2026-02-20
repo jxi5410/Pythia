@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .database import PythiaDB
 
@@ -14,6 +14,7 @@ from .database import PythiaDB
 @dataclass
 class Signal:
     market_id: str
+    market_title: str
     timestamp: datetime
     signal_type: str  # PROBABILITY_SPIKE, VOLUME_ANOMALY, ARBITRAGE, CORRELATION_DEV, OPTIMISM_TAX
     severity: str  # LOW, MEDIUM, HIGH, CRITICAL
@@ -22,6 +23,12 @@ class Signal:
     new_price: Optional[float]
     expected_return: float
     metadata: Dict
+    # Intelligence fields
+    asset_class: str = ""
+    instruments: str = ""
+    why_it_matters: str = ""
+    correlated_markets: List[Dict] = field(default_factory=list)
+    news_context: List[Dict] = field(default_factory=list)
 
 
 class SignalDetector:
@@ -139,6 +146,7 @@ class SignalDetector:
 
         return Signal(
             market_id=market_data['id'],
+            market_title=market_data.get('title', 'Unknown'),
             timestamp=datetime.now(),
             signal_type="PROBABILITY_SPIKE",
             severity=severity,
@@ -181,6 +189,7 @@ class SignalDetector:
 
         return Signal(
             market_id=market_data['id'],
+            market_title=market_data.get('title', 'Unknown'),
             timestamp=datetime.now(),
             signal_type="VOLUME_ANOMALY",
             severity=severity,
@@ -217,6 +226,7 @@ class SignalDetector:
 
         return Signal(
             market_id=market_data['id'],
+            market_title=market_data.get('title', 'Unknown'),
             timestamp=datetime.now(),
             signal_type="MAKER_EDGE",
             severity="MEDIUM",
@@ -251,6 +261,7 @@ class SignalDetector:
         if current > short_ma * 1.02 and short_ma > long_ma * 1.01:
             return Signal(
                 market_id=market_data['id'],
+                market_title=market_data.get('title', 'Unknown'),
                 timestamp=datetime.now(),
                 signal_type="MOMENTUM_BREAKOUT",
                 severity="HIGH",
@@ -268,6 +279,7 @@ class SignalDetector:
         elif current < short_ma * 0.98 and short_ma < long_ma * 0.99:
             return Signal(
                 market_id=market_data['id'],
+                market_title=market_data.get('title', 'Unknown'),
                 timestamp=datetime.now(),
                 signal_type="MOMENTUM_BREAKDOWN",
                 severity="HIGH",
@@ -345,6 +357,7 @@ class SignalDetector:
 
         return Signal(
             market_id=market_data['id'],
+            market_title=market_data.get('title', 'Unknown'),
             timestamp=datetime.now(),
             signal_type="OPTIMISM_TAX",
             severity=severity,

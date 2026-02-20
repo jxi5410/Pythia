@@ -6,13 +6,16 @@ import time
 import sys
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 import pandas as pd
 
 from .config import Config
 from .database import PythiaDB
 from .detector import SignalDetector, Signal
 from .alerts import TelegramAlerter
+from .asset_map import classify_market
+from .correlations import find_correlated_markets
+from .news_context import get_news_context
 
 # Import connectors
 try:
@@ -224,6 +227,27 @@ class PythiaLive:
             # Run signal detection — pass trades for optimism tax analysis
             signals = self.detector.detect_all(market_data, price_history, trades=trades)
 
+            # Enrich signals with intelligence context
+            for signal in signals:
+                # 1. Asset class mapping
+                classification = classify_market(
+                    market.get('title', ''),
+                    market.get('description', ''),
+                )
+                signal.asset_class = classification['asset_class']
+                signal.instruments = classification['instruments']
+                signal.why_it_matters = classification['how_it_matters']
+
+                # 2. Correlated markets (only for HIGH/CRITICAL to save DB queries)
+                if signal.severity in ('HIGH', 'CRITICAL'):
+                    signal.correlated_markets = find_correlated_markets(
+                        self.db, market['id'], market.get('title', ''),
+                    )
+
+                # 3. News context (only for CRITICAL)
+                if signal.severity == 'CRITICAL':
+                    signal.news_context = get_news_context(market.get('title', ''))
+
             return signals
 
         except Exception as e:
@@ -255,16 +279,9 @@ class PythiaLive:
 
             # Send Telegram alert for HIGH and CRITICAL
             if signal.severity in ["HIGH", "CRITICAL"]:
-                # Get market info
-                market_title = "Unknown"
-                for conn_name, conn in self.connectors.items():
-                    if conn_name in signal.market_id.lower():
-                        market_title = f"{conn_name.upper()} Market"
-                        break
-
                 sent = self.alerter.send_signal(
                     signal=signal,
-                    market_title=market_title,
+                    market_title=signal.market_title,
                     market_url=self._get_market_url(signal.market_id)
                 )
 
