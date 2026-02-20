@@ -249,6 +249,13 @@ class SignalDetector:
         if price_history.empty or len(price_history) < 10:
             return None
 
+        # Skip micro-cap / penny markets — too noisy for momentum signals
+        current_price = market_data.get('yes_price', 0)
+        if current_price < 0.05 or current_price > 0.95:
+            return None
+        if market_data.get('liquidity', 0) < 50000:
+            return None
+
         prices = price_history['yes_price'].values
 
         # Calculate short and long MA
