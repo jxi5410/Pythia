@@ -13,6 +13,10 @@ RELAY_FILE = Path("/Users/xj.ai/.openclaw/workspace/pythia_alerts.jsonl")
 
 def relay_signal(signal: Signal, pattern_insight: str = "") -> bool:
     """Append signal to relay file for OpenClaw to pick up."""
+    # Filter noise: skip penny markets and extreme prices
+    price = signal.new_price or signal.old_price or 0
+    if price < 0.05 or price > 0.95:
+        return False
     try:
         entry = {
             "timestamp": signal.timestamp.isoformat(),
