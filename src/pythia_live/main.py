@@ -13,6 +13,7 @@ from .config import Config
 from .database import PythiaDB
 from .detector import SignalDetector, Signal
 from .alerts import TelegramAlerter
+from .alert_relay import relay_signal
 from .asset_map import classify_market
 from .correlations import find_correlated_markets
 from .news_context import get_news_context
@@ -277,20 +278,19 @@ class PythiaLive:
             elif signal.severity == "HIGH":
                 high_count += 1
 
-            # Send Telegram alert for HIGH and CRITICAL
+            # Relay all HIGH/CRITICAL signals for OpenClaw to push
             if signal.severity in ["HIGH", "CRITICAL"]:
+                relay_signal(signal)
+                print(f"  Signal relayed: {signal.signal_type} ({signal.severity})")
+
+                # Also try Telegram direct (if configured)
                 sent = self.alerter.send_signal(
                     signal=signal,
                     market_title=signal.market_title,
                     market_url=self._get_market_url(signal.market_id)
                 )
-
-                # Mark as alerted
-                status = "SENT" if sent else "FAILED"
-                self.db.mark_alert_sent(signal_id, "telegram", status)
-
                 if sent:
-                    print(f"  Alert sent: {signal.signal_type} ({signal.severity})")
+                    self.db.mark_alert_sent(signal_id, "telegram", "SENT")
 
         # Summary
         print(f"\nSignal Summary:")
