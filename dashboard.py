@@ -398,7 +398,7 @@ with tab4:
         # Signals over time
         st.divider()
         st.subheader("Signal Activity")
-        signals_df['timestamp'] = pd.to_datetime(signals_df['timestamp'])
+        signals_df['timestamp'] = pd.to_datetime(signals_df['timestamp'], format='mixed')
         hourly = signals_df.set_index('timestamp').resample('h').size()
 
         fig = go.Figure()
@@ -479,7 +479,7 @@ with tab5:
             # --- Spike Timeline Scatter ---
             st.markdown("#### Spike Timeline")
 
-            spike_df['timestamp'] = pd.to_datetime(spike_df['timestamp'])
+            spike_df['timestamp'] = pd.to_datetime(spike_df['timestamp'], format='mixed')
             spike_df['magnitude_pct'] = spike_df['magnitude'] * 100
 
             fig = px.scatter(
