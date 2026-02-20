@@ -17,6 +17,8 @@ from .alert_relay import relay_signal
 from .asset_map import classify_market
 from .correlations import find_correlated_markets
 from .news_context import get_news_context
+from .spike_archive import detect_spike, attribute_spike, save_spike, SpikeEvent
+from .patterns import build_patterns, find_matching_pattern, format_pattern_insight
 
 # Import connectors
 try:
@@ -69,6 +71,8 @@ class PythiaLive:
 
         self.running = False
         self.cycle_count = 0
+        self._patterns = []  # Causal pattern cache
+        self._patterns_last_built = None
 
     def run(self):
         """Main execution loop."""
@@ -96,9 +100,14 @@ class PythiaLive:
                 print(f"Cycle {self.cycle_count} | {datetime.now().strftime('%H:%M:%S')}")
                 print('='*60)
 
-                # 1. Update market list (every 10 cycles)
+                # 1. Update market list and rebuild patterns (every 10 cycles)
                 if self.cycle_count % 10 == 0:
                     markets = self._discover_markets()
+                    try:
+                        self._patterns = build_patterns(self.db)
+                        logger.info("Rebuilt %d causal patterns", len(self._patterns))
+                    except Exception as e:
+                        logger.warning("Pattern build failed: %s", e)
 
                 # 2. Fetch recent trades (batch per source)
                 all_trades = self._fetch_all_trades()
@@ -249,6 +258,31 @@ class PythiaLive:
                 if signal.severity == 'CRITICAL':
                     signal.news_context = get_news_context(market.get('title', ''))
 
+                # 4. Pattern matching — find historical causal patterns
+                if signal.severity in ('HIGH', 'CRITICAL'):
+                    matched = find_matching_pattern(self._patterns, signal)
+                    if matched:
+                        insight = format_pattern_insight(matched, signal)
+                        signal.metadata['pattern_insight'] = insight
+                        signal.description += f" | {insight}"
+
+            # 5. Spike detection — archive significant price moves
+            spike = detect_spike(price_history, threshold=self.config.PROBABILITY_SPIKE_THRESHOLD)
+            if spike:
+                spike.market_id = market_id
+                spike.market_title = market.get('title', '')
+                spike.asset_class = classify_market(
+                    market.get('title', ''), market.get('description', '')
+                )['asset_class']
+                try:
+                    spike = attribute_spike(spike)
+                except Exception as e:
+                    logger.warning("Spike attribution failed for %s: %s", market_id, e)
+                save_spike(self.db, spike)
+                logger.info("Spike archived: %s %s %.1f%% on %s",
+                            spike.direction, spike.market_title,
+                            spike.magnitude * 100, market_id)
+
             return signals
 
         except Exception as e:
@@ -280,7 +314,7 @@ class PythiaLive:
 
             # Relay all HIGH/CRITICAL signals for OpenClaw to push
             if signal.severity in ["HIGH", "CRITICAL"]:
-                relay_signal(signal)
+                relay_signal(signal, pattern_insight=signal.metadata.get('pattern_insight', ''))
                 print(f"  Signal relayed: {signal.signal_type} ({signal.severity})")
 
                 # Also try Telegram direct (if configured)

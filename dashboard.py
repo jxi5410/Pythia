@@ -164,8 +164,8 @@ with st.sidebar:
         st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📡 Intelligence Feed", "🗺️ Market Map", "🚨 Signals", "🔬 Analysis"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📡 Intelligence Feed", "🗺️ Market Map", "🚨 Signals", "🔬 Analysis", "🔍 Spike Explorer"
 ])
 
 # ─────────────────────────────────────────────
@@ -457,6 +457,190 @@ with tab4:
     else:
         st.info("Insufficient data for analysis")
 
+# ─────────────────────────────────────────────
+# Tab 5: Spike Explorer
+# ─────────────────────────────────────────────
+with tab5:
+    st.subheader("Spike Archive & Causal Patterns")
+
+    conn = get_db()
+    if conn:
+        # Check if spike_events table exists
+        try:
+            spike_df = pd.read_sql_query("""
+                SELECT * FROM spike_events
+                ORDER BY timestamp DESC
+                LIMIT 200
+            """, conn)
+        except Exception:
+            spike_df = pd.DataFrame()
+
+        if not spike_df.empty:
+            # --- Spike Timeline Scatter ---
+            st.markdown("#### Spike Timeline")
+
+            spike_df['timestamp'] = pd.to_datetime(spike_df['timestamp'])
+            spike_df['magnitude_pct'] = spike_df['magnitude'] * 100
+
+            fig = px.scatter(
+                spike_df,
+                x='timestamp',
+                y='magnitude_pct',
+                color='asset_class',
+                size='volume_at_spike',
+                size_max=20,
+                hover_data=['market_title', 'direction', 'manual_tag'],
+                labels={
+                    'timestamp': 'Time',
+                    'magnitude_pct': 'Magnitude (%)',
+                    'asset_class': 'Asset Class',
+                },
+                color_discrete_map={
+                    'rates': '#4db8ff', 'fx': '#b84dff', 'equities': '#4dffb8',
+                    'commodities': '#ffb84d', 'crypto': '#ff4dff',
+                    'geopolitical': '#ff4d4d', 'general': '#8b9dc3',
+                },
+            )
+            fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font_color='#8b9dc3',
+                xaxis_gridcolor='#2a3441',
+                yaxis_gridcolor='#2a3441',
+                height=400,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- Filters ---
+            st.divider()
+            st.markdown("#### Spike Detail Table")
+
+            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+            with col_f1:
+                asset_options = ['All'] + sorted(spike_df['asset_class'].dropna().unique().tolist())
+                sel_asset = st.selectbox("Asset Class", asset_options, key="spike_asset")
+            with col_f2:
+                dir_options = ['All', 'up', 'down']
+                sel_dir = st.selectbox("Direction", dir_options, key="spike_dir")
+            with col_f3:
+                min_mag = st.slider("Min Magnitude (%)", 0.0, 30.0, 3.0, 0.5, key="spike_mag")
+            with col_f4:
+                date_range = st.selectbox("Date Range", ["All Time", "7 Days", "30 Days", "90 Days"], key="spike_date")
+
+            filtered = spike_df.copy()
+            if sel_asset != 'All':
+                filtered = filtered[filtered['asset_class'] == sel_asset]
+            if sel_dir != 'All':
+                filtered = filtered[filtered['direction'] == sel_dir]
+            filtered = filtered[filtered['magnitude'] >= min_mag / 100]
+            if date_range != "All Time":
+                days = {"7 Days": 7, "30 Days": 30, "90 Days": 90}[date_range]
+                cutoff = datetime.now() - timedelta(days=days)
+                filtered = filtered[filtered['timestamp'] >= cutoff]
+
+            # Parse attributed events for display
+            def get_cause(row):
+                events = row.get('attributed_events', '[]')
+                if isinstance(events, str):
+                    try:
+                        events = json.loads(events)
+                    except (json.JSONDecodeError, TypeError):
+                        return ''
+                if events and isinstance(events, list) and len(events) > 0:
+                    return events[0].get('headline', '')[:80]
+                return ''
+
+            def get_reaction(row):
+                reaction = row.get('asset_reaction', '')
+                if isinstance(reaction, str):
+                    try:
+                        reaction = json.loads(reaction)
+                    except (json.JSONDecodeError, TypeError):
+                        return ''
+                if isinstance(reaction, dict) and reaction:
+                    mag = reaction.get('magnitude', 0)
+                    return f"{mag:+.1%}" if mag else ''
+                return ''
+
+            display = filtered[['id', 'timestamp', 'market_title', 'direction', 'magnitude',
+                                'asset_class', 'manual_tag']].copy()
+            display['attributed_cause'] = filtered.apply(get_cause, axis=1)
+            display['asset_reaction'] = filtered.apply(get_reaction, axis=1)
+            display['magnitude'] = display['magnitude'].apply(lambda x: f"{x:.1%}")
+            display.columns = ['ID', 'Timestamp', 'Market', 'Dir', 'Magnitude',
+                               'Asset Class', 'Manual Tag', 'Attributed Cause', 'Reaction']
+
+            st.dataframe(
+                display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Market': st.column_config.TextColumn("Market", width="large"),
+                    'Attributed Cause': st.column_config.TextColumn("Attributed Cause", width="large"),
+                }
+            )
+
+            # --- Manual Tagging ---
+            st.divider()
+            st.markdown("#### Manual Spike Tagging")
+            st.caption("Tag a spike with its real-world cause for pattern building")
+
+            with st.form("spike_tag_form"):
+                col_t1, col_t2 = st.columns([1, 3])
+                with col_t1:
+                    tag_spike_id = st.number_input("Spike ID", min_value=1, step=1, key="tag_id")
+                with col_t2:
+                    tag_text = st.text_input("Cause / Tag", placeholder="e.g. weak jobs report, FOMC hawkish hold")
+                submitted = st.form_submit_button("Save Tag")
+                if submitted and tag_text:
+                    try:
+                        conn.execute(
+                            "UPDATE spike_events SET manual_tag = ? WHERE id = ?",
+                            (tag_text, int(tag_spike_id))
+                        )
+                        conn.commit()
+                        st.success(f"Tagged spike #{int(tag_spike_id)}: {tag_text}")
+                    except Exception as e:
+                        st.error(f"Failed to tag: {e}")
+
+            # --- Pattern Cards ---
+            st.divider()
+            st.markdown("#### Discovered Causal Patterns")
+            st.caption("Patterns emerge as more spikes are recorded and tagged")
+
+            try:
+                from src.pythia_live.patterns import build_patterns
+                from src.pythia_live.database import PythiaDB
+
+                pattern_db = PythiaDB(str(DB_PATH))
+                patterns = build_patterns(pattern_db)
+
+                if patterns:
+                    for p in patterns[:10]:
+                        conf_color = '#2ed573' if p.confidence >= 0.7 else '#eccc68' if p.confidence >= 0.5 else '#ff6348'
+                        reaction_str = ''
+                        if p.avg_asset_reaction:
+                            sign = '+' if p.avg_asset_reaction > 0 else ''
+                            reaction_str = f" | Avg reaction: {sign}{p.avg_asset_reaction:.1%}"
+
+                        st.markdown(f"""
+                        <div class="signal-card" style="border-left-color: {conf_color};">
+                            <b>{p.market_category.upper()}</b> · {p.asset_class} · {p.direction}
+                            <br>Avg magnitude: {p.avg_magnitude:.1%} · Samples: {p.sample_size}{reaction_str}
+                            <br><span style="color:#8b9dc3">Typical cause: {p.typical_cause or 'untagged'}
+                            · Confidence: {p.confidence:.0%}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("No patterns yet — spikes need to accumulate before patterns emerge.")
+            except Exception as e:
+                st.info(f"Pattern library not available: {e}")
+
+        else:
+            st.info("No spike events recorded yet. Start Pythia Live to begin detecting spikes.")
+    else:
+        st.warning("Database not available")
+
 # Footer
 st.divider()
-st.caption("Pythia Live v0.4 | Intelligence Briefing System")
+st.caption("Pythia Live v0.5 | Causal Analysis Engine")

@@ -139,6 +139,39 @@ class PythiaDB:
                 ON prices(market_id)
             """)
 
+            # --- Spike events (v0.5) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS spike_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market_id TEXT,
+                    market_title TEXT,
+                    timestamp TIMESTAMP,
+                    direction TEXT,
+                    magnitude REAL,
+                    price_before REAL,
+                    price_after REAL,
+                    volume_at_spike REAL,
+                    asset_class TEXT,
+                    attributed_events TEXT DEFAULT '[]',
+                    manual_tag TEXT DEFAULT '',
+                    asset_reaction TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (market_id) REFERENCES markets(id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spikes_market
+                ON spike_events(market_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spikes_asset
+                ON spike_events(asset_class)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spikes_time
+                ON spike_events(timestamp)
+            """)
+
             conn.commit()
 
     # ------------------------------------------------------------------
@@ -315,6 +348,77 @@ class PythiaDB:
                 WHERE s.timestamp > datetime('now', ?)
                 ORDER BY s.timestamp DESC
             """, conn, params=(f'-{hours} hours',))
+
+    # ------------------------------------------------------------------
+    # Spike Events (v0.5)
+    # ------------------------------------------------------------------
+
+    def save_spike_event(self, spike_dict: Dict) -> int:
+        """Save a spike event and return its ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                INSERT INTO spike_events
+                (market_id, market_title, timestamp, direction, magnitude,
+                 price_before, price_after, volume_at_spike, asset_class,
+                 attributed_events, manual_tag, asset_reaction)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                spike_dict['market_id'],
+                spike_dict.get('market_title', ''),
+                spike_dict.get('timestamp', datetime.now()),
+                spike_dict.get('direction', ''),
+                spike_dict.get('magnitude', 0),
+                spike_dict.get('price_before', 0),
+                spike_dict.get('price_after', 0),
+                spike_dict.get('volume_at_spike', 0),
+                spike_dict.get('asset_class', ''),
+                json.dumps(spike_dict.get('attributed_events', [])),
+                spike_dict.get('manual_tag', ''),
+                json.dumps(spike_dict.get('asset_reaction', {})),
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_spike_events(self, market_id: str = None, asset_class: str = None,
+                         min_magnitude: float = 0.03, limit: int = 50) -> pd.DataFrame:
+        """Get spike events with optional filters."""
+        query = "SELECT * FROM spike_events WHERE magnitude >= ?"
+        params: list = [min_magnitude]
+
+        if market_id:
+            query += " AND market_id = ?"
+            params.append(market_id)
+        if asset_class:
+            query += " AND asset_class = ?"
+            params.append(asset_class)
+
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=params)
+
+    def update_spike_tag(self, spike_id: int, tag: str):
+        """Update manual tag for a spike event."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE spike_events SET manual_tag = ? WHERE id = ?",
+                (tag, spike_id)
+            )
+            conn.commit()
+
+    def update_spike_reaction(self, spike_id: int, reaction: Dict):
+        """Update asset reaction data for a spike event."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE spike_events SET asset_reaction = ? WHERE id = ?",
+                (json.dumps(reaction), spike_id)
+            )
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Queries (unchanged interface)
+    # ------------------------------------------------------------------
 
     def get_liquid_markets(self, min_liquidity: float = 10000) -> pd.DataFrame:
         """Get liquid markets."""

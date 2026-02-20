@@ -11,7 +11,7 @@ from .detector import Signal
 RELAY_FILE = Path("/Users/xj.ai/.openclaw/workspace/pythia_alerts.jsonl")
 
 
-def relay_signal(signal: Signal) -> bool:
+def relay_signal(signal: Signal, pattern_insight: str = "") -> bool:
     """Append signal to relay file for OpenClaw to pick up."""
     try:
         entry = {
@@ -28,6 +28,7 @@ def relay_signal(signal: Signal) -> bool:
             "why_it_matters": signal.why_it_matters,
             "correlated_markets": signal.correlated_markets[:3] if signal.correlated_markets else [],
             "news_context": signal.news_context[:2] if signal.news_context else [],
+            "pattern_insight": pattern_insight,
             "relayed": False
         }
         with open(RELAY_FILE, "a") as f:
