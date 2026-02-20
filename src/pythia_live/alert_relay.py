@@ -13,9 +13,19 @@ RELAY_FILE = Path("/Users/xj.ai/.openclaw/workspace/pythia_alerts.jsonl")
 
 def relay_signal(signal: Signal, pattern_insight: str = "") -> bool:
     """Append signal to relay file for OpenClaw to pick up."""
-    # Filter noise: skip penny markets and extreme prices
+    # Filter noise
     price = signal.new_price or signal.old_price or 0
     if price < 0.05 or price > 0.95:
+        return False
+    # Skip non-tradeable categories (sports, entertainment, memes)
+    skip_classes = {"general"}
+    if signal.asset_class in skip_classes:
+        return False
+    title_lower = (signal.market_title or "").lower()
+    noise_keywords = ["nba", "nfl", "nhl", "mlb", "stanley cup", "super bowl",
+                      "finals?", "win the 2", "gta", "album", "grammy", "oscar",
+                      "emmy", "bachelor", "love island", "squid game"]
+    if any(kw in title_lower for kw in noise_keywords):
         return False
     try:
         entry = {
