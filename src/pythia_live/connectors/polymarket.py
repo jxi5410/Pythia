@@ -1,123 +1,241 @@
 """
-Polymarket CLOB API Connector
-Real-time market data
+Polymarket Connector — Gamma API + Data API
+Uses httpx with retry logic, offset-based pagination, market + trade fetching.
 """
-import requests
-import json
-from typing import List, Dict, Optional
+import httpx
+import time
+import logging
+from typing import List, Dict, Optional, Iterator
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Retry config
+MAX_RETRIES = 3
+RETRY_BACKOFF = 1.0  # seconds, doubles each retry
+REQUEST_TIMEOUT = 15.0
+
+
+def _request_with_retry(client: httpx.Client, method: str, url: str, **kwargs) -> httpx.Response:
+    """Make an HTTP request with exponential backoff retry."""
+    kwargs.setdefault("timeout", REQUEST_TIMEOUT)
+    last_exc = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = client.request(method, url, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            last_exc = exc
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                raise  # Don't retry client errors
+            wait = RETRY_BACKOFF * (2 ** attempt)
+            logger.warning("Polymarket request failed (attempt %d/%d): %s — retrying in %.1fs",
+                           attempt + 1, MAX_RETRIES, exc, wait)
+            time.sleep(wait)
+    raise last_exc  # type: ignore[misc]
+
 
 class PolymarketConnector:
     """
-    Polymarket CLOB (Central Limit Order Book) API
-    REST API for market data
+    Polymarket connector using:
+    - Gamma API (https://gamma-api.polymarket.com) for market metadata
+    - Data API (https://data-api.polymarket.com) for trades
     """
-    
-    BASE_URL = "https://clob.polymarket.com"
-    
+
+    GAMMA_URL = "https://gamma-api.polymarket.com"
+    DATA_URL = "https://data-api.polymarket.com"
+
     def __init__(self):
-        self.session = requests.Session()
-        
+        self.client = httpx.Client(
+            headers={"Accept": "application/json"},
+            follow_redirects=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Markets
+    # ------------------------------------------------------------------
+
     def get_active_markets(self, limit: int = 100) -> List[Dict]:
         """
-        Fetch active markets from Polymarket.
-        
-        Returns list of markets with liquidity info.
+        Fetch active markets from Gamma API.
+        Returns list of normalised market dicts compatible with PythiaDB.
         """
         try:
-            # Get markets with filtering
-            url = f"{self.BASE_URL}/markets"
             params = {
                 "active": "true",
                 "closed": "false",
-                "limit": limit
+                "limit": min(limit, 100),
+                "offset": 0,
             }
-            
-            response = self.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
+            resp = _request_with_retry(self.client, "GET",
+                                       f"{self.GAMMA_URL}/markets", params=params)
+            raw_markets = resp.json()
+            # Gamma returns a plain list
+            if isinstance(raw_markets, dict):
+                raw_markets = raw_markets.get("data", raw_markets.get("markets", []))
+
             markets = []
-            
-            for market in data.get('data', []):
-                # Extract relevant fields
-                market_data = {
-                    'id': market.get('condition_id', market.get('id')),
-                    'source': 'polymarket',
-                    'title': market.get('question', 'Unknown'),
-                    'category': market.get('category', 'General'),
-                    'liquidity': float(market.get('liquidity', 0) or 0),
-                    'volume_24h': float(market.get('volume_24h', 0) or 0),
-                    'description': market.get('description', ''),
-                    'end_date': market.get('end_date'),
-                    'created_at': market.get('created_at', datetime.now().isoformat())
-                }
-                markets.append(market_data)
-                
+            for m in raw_markets[:limit]:
+                markets.append(self._normalise_market(m))
             return markets
-            
-        except Exception as e:
-            print(f"Polymarket API error: {e}")
+
+        except Exception as exc:
+            logger.error("Polymarket get_active_markets failed: %s", exc)
             return []
-    
+
+    def iter_markets(self, *, page_size: int = 100, max_pages: int = 20) -> Iterator[Dict]:
+        """
+        Iterate over all active markets using offset-based pagination.
+        Yields normalised market dicts.
+        """
+        offset = 0
+        for _ in range(max_pages):
+            try:
+                params = {
+                    "active": "true",
+                    "closed": "false",
+                    "limit": page_size,
+                    "offset": offset,
+                }
+                resp = _request_with_retry(self.client, "GET",
+                                           f"{self.GAMMA_URL}/markets", params=params)
+                raw = resp.json()
+                if isinstance(raw, dict):
+                    raw = raw.get("data", raw.get("markets", []))
+
+                if not raw:
+                    break
+
+                for m in raw:
+                    yield self._normalise_market(m)
+
+                if len(raw) < page_size:
+                    break
+                offset += page_size
+
+            except Exception as exc:
+                logger.error("Polymarket iter_markets page offset=%d failed: %s", offset, exc)
+                break
+
+    # ------------------------------------------------------------------
+    # Prices
+    # ------------------------------------------------------------------
+
     def get_market_price(self, market_id: str) -> Optional[Dict]:
         """
-        Get current price for a specific market.
-        
+        Get current price for a specific market via Gamma API.
         Returns best bid/ask for yes/no tokens.
         """
         try:
-            url = f"{self.BASE_URL}/markets/{market_id}"
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # Get orderbook for YES token
-            yes_token = data.get('yes_token_id') or data.get('tokens', [{}])[0].get('token_id')
-            
-            if yes_token:
-                book_url = f"{self.BASE_URL}/book"
-                book_response = self.session.get(book_url, params={"token_id": yes_token}, timeout=10)
-                book_data = book_response.json()
-                
-                # Extract best prices
-                bids = book_data.get('bids', [])
-                asks = book_data.get('asks', [])
-                
-                best_bid = float(bids[0]['price']) if bids else 0.5
-                best_ask = float(asks[0]['price']) if asks else 0.5
-                
-                return {
-                    'market_id': market_id,
-                    'yes_bid': best_bid,
-                    'yes_ask': best_ask,
-                    'no_bid': 1 - best_ask,
-                    'no_ask': 1 - best_bid,
-                    'mid_price': (best_bid + best_ask) / 2,
-                    'spread': best_ask - best_bid,
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-        except Exception as e:
-            print(f"Price fetch error for {market_id}: {e}")
+            resp = _request_with_retry(self.client, "GET",
+                                       f"{self.GAMMA_URL}/markets/{market_id}")
+            data = resp.json()
+
+            # Gamma provides outcomePrices as a JSON-encoded list
+            outcome_prices = data.get("outcomePrices")
+            if outcome_prices:
+                if isinstance(outcome_prices, str):
+                    import json
+                    outcome_prices = json.loads(outcome_prices)
+                yes_price = float(outcome_prices[0]) if outcome_prices else 0.5
+                no_price = float(outcome_prices[1]) if len(outcome_prices) > 1 else 1 - yes_price
+            else:
+                yes_price = 0.5
+                no_price = 0.5
+
+            spread = float(data.get("spread", 0) or 0)
+
+            return {
+                "market_id": market_id,
+                "yes_price": yes_price,
+                "no_price": no_price,
+                "yes_bid": yes_price - spread / 2,
+                "yes_ask": yes_price + spread / 2,
+                "no_bid": no_price - spread / 2,
+                "no_ask": no_price + spread / 2,
+                "mid_price": yes_price,
+                "spread": spread,
+                "volume": float(data.get("volume", 0) or 0),
+                "liquidity": float(data.get("liquidity", 0) or 0),
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception as exc:
+            logger.error("Polymarket price fetch error for %s: %s", market_id, exc)
             return None
-    
-    def get_market_orderbook(self, market_id: str) -> Optional[Dict]:
-        """Get full orderbook for market."""
+
+    # ------------------------------------------------------------------
+    # Trades
+    # ------------------------------------------------------------------
+
+    def get_recent_trades(self, limit: int = 200) -> List[Dict]:
+        """
+        Fetch recent trades across all markets from the Data API.
+        """
         try:
-            # First get token ID
-            market_url = f"{self.BASE_URL}/markets/{market_id}"
-            market_response = self.session.get(market_url, timeout=10)
-            market_data = market_response.json()
-            
-            yes_token = market_data.get('yes_token_id') or market_data.get('tokens', [{}])[0].get('token_id')
-            
-            if yes_token:
-                book_url = f"{self.BASE_URL}/book"
-                response = self.session.get(book_url, params={"token_id": yes_token}, timeout=10)
-                return response.json()
-                
-        except Exception as e:
-            print(f"Orderbook error: {e}")
-            return None
+            params = {"limit": min(limit, 500)}
+            resp = _request_with_retry(self.client, "GET",
+                                       f"{self.DATA_URL}/trades", params=params)
+            raw = resp.json()
+            if isinstance(raw, dict):
+                raw = raw.get("data", raw.get("trades", []))
+            return [self._normalise_trade(t) for t in raw]
+        except Exception as exc:
+            logger.error("Polymarket get_recent_trades failed: %s", exc)
+            return []
+
+    def get_market_trades(self, market_id: str, limit: int = 200) -> List[Dict]:
+        """
+        Fetch recent trades for a specific market from the Data API.
+        Uses condition_id (= market_id in our schema) for filtering.
+        """
+        try:
+            params = {"market": market_id, "limit": min(limit, 500)}
+            resp = _request_with_retry(self.client, "GET",
+                                       f"{self.DATA_URL}/trades", params=params)
+            raw = resp.json()
+            if isinstance(raw, dict):
+                raw = raw.get("data", raw.get("trades", []))
+            return [self._normalise_trade(t) for t in raw]
+        except Exception as exc:
+            logger.error("Polymarket get_market_trades(%s) failed: %s", market_id, exc)
+            return []
+
+    # ------------------------------------------------------------------
+    # Normalisation helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalise_market(m: dict) -> Dict:
+        """Map Gamma API fields to Pythia's internal format."""
+        return {
+            "id": m.get("conditionId") or m.get("condition_id") or m.get("id", ""),
+            "source": "polymarket",
+            "title": m.get("question") or m.get("title") or "Unknown",
+            "category": m.get("category") or m.get("groupSlug") or "General",
+            "liquidity": float(m.get("liquidity", 0) or 0),
+            "volume_24h": float(m.get("volume24hr", 0) or m.get("volume_24h", 0) or 0),
+            "description": m.get("description") or "",
+            "end_date": m.get("endDate") or m.get("end_date"),
+            "created_at": m.get("createdAt") or m.get("created_at") or datetime.now().isoformat(),
+        }
+
+    @staticmethod
+    def _normalise_trade(t: dict) -> Dict:
+        """Map Data API trade to Pythia's internal trade format."""
+        # Determine taker side: if outcome == "Yes" that means taker bought YES
+        outcome = (t.get("outcome") or t.get("side") or "").upper()
+        taker_side = "yes" if "YES" in outcome else "no"
+
+        return {
+            "trade_id": t.get("id") or t.get("tradeId") or "",
+            "market_id": t.get("conditionId") or t.get("market") or t.get("condition_id") or "",
+            "source": "polymarket",
+            "timestamp": t.get("timestamp") or t.get("createdAt") or datetime.now().isoformat(),
+            "price": float(t.get("price", 0) or 0),
+            "amount": float(t.get("size", 0) or t.get("amount", 0) or 0),
+            "taker_side": taker_side,
+            "maker_address": t.get("makerAddress") or t.get("maker", ""),
+            "taker_address": t.get("takerAddress") or t.get("taker", ""),
+        }
