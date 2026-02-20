@@ -184,20 +184,19 @@ class PythiaLive:
         source = market['source']
 
         try:
-            # Get connector
-            connector = self.connectors.get(source)
-            if not connector:
-                return []
+            # Use prices already available from market listing (avoids per-market API calls)
+            yes_price = market.get('yes_price', 0.5)
+            no_price = market.get('no_price', 1 - yes_price)
+            volume = market.get('volume_24h', 0)
 
-            # Fetch price
-            price_data = connector.get_market_price(market_id)
-            if not price_data:
-                return []
-
-            # Save price
-            yes_price = price_data.get('yes_price') or price_data.get('mid_price', 0.5)
-            no_price = price_data.get('no_price', 1 - yes_price)
-            volume = price_data.get('volume', 0)
+            price_data = {
+                'yes_price': yes_price,
+                'no_price': no_price,
+                'volume': volume,
+                'yes_bid': yes_price,
+                'yes_ask': yes_price,
+                'spread': 0,
+            }
 
             self.db.save_price(market_id, yes_price, no_price, volume)
 
