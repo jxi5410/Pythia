@@ -19,6 +19,7 @@ from .database import PythiaDB
 from .detector import SignalDetector, Signal
 from .causal_v2 import attribute_spike_v2
 from .config import Config
+from .equities import correlate_spike, format_correlation_alert
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,23 @@ class Pipeline:
                     "top_candidates": [],
                 }
 
+            # Run cross-asset correlation
+            correlation = None
+            if not self.dry_run:
+                try:
+                    from .causal_v2 import classify_market
+                    category = classify_market(spike.market_title)
+                    correlation = correlate_spike(
+                        market_title=spike.market_title,
+                        category=category,
+                        spike_time=spike.timestamp,
+                        spike_direction=spike.direction,
+                    )
+                    logger.info("Cross-asset correlation: %s",
+                                correlation.get("cross_asset_confidence", "N/A"))
+                except Exception as e:
+                    logger.warning("Cross-asset correlation failed: %s", e)
+
             self._recent_spike_proxies.append(spike)
             # Keep only last 20
             self._recent_spike_proxies = self._recent_spike_proxies[-20:]
@@ -187,6 +205,7 @@ class Pipeline:
                 "attribution": result.get("attribution", {}),
                 "candidates_retrieved": result.get("candidates_retrieved", 0),
                 "candidates_filtered": result.get("candidates_filtered", 0),
+                "correlation": correlation,
             }
             alerts.append(alert)
 

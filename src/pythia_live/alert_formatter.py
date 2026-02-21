@@ -2,6 +2,7 @@
 Alert Formatter — Formats causal attribution results into Telegram messages.
 """
 from typing import Dict, Optional
+from .equities import format_correlation_alert
 
 
 def format_alert(alert: Dict, pattern_insight: Optional[str] = None) -> str:
@@ -51,5 +52,13 @@ def format_alert(alert: Dict, pattern_insight: Optional[str] = None) -> str:
     if pattern_insight:
         lines.append("")
         lines.append(f"📈 PATTERN: {pattern_insight}")
+
+    # Cross-asset correlation section
+    correlation = alert.get("correlation")
+    if correlation:
+        corr_text = format_correlation_alert(correlation)
+        if corr_text:
+            lines.append("")
+            lines.append(corr_text)
 
     return "\n".join(lines)
