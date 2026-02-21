@@ -3,6 +3,7 @@
   "max_daily_trades": 10,
   "daily_loss_limit": 0.10,
   "max_drawdown": 0.20,
+  "telegram_bot_token": "8384420812:AAFKzYH0mi7kqj4XHE1EhK6YrGDX3RMZRiw",
   "telegram_chat_id": "8280876077",
   "poll_interval": 30,
   "signal_cooldown": 300,
