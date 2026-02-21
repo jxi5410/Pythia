@@ -89,15 +89,16 @@ def build_patterns(db: PythiaDB) -> List[CausalPattern]:
         sample_size = len(group_spikes)
         avg_magnitude = sum(s.magnitude for s in group_spikes) / sample_size
 
-        # Find most common attributed cause
+        # Find most common attributed cause (use headlines, not source domains)
         cause_counts: Dict[str, int] = {}
+        all_headlines: list = []
         for s in group_spikes:
             for evt in s.attributed_events:
-                headline = evt.get('headline', '')[:80]
+                headline = evt.get('headline', '').strip()[:100]
                 if headline:
-                    # Group by source domain as a proxy for cause type
-                    source = evt.get('source', 'unknown')
-                    cause_counts[source] = cause_counts.get(source, 0) + 1
+                    all_headlines.append(headline)
+                    # Extract key phrase: strip source prefix, use first meaningful clause
+                    cause_counts[headline] = cause_counts.get(headline, 0) + 1
             if s.manual_tag:
                 cause_counts[s.manual_tag] = cause_counts.get(s.manual_tag, 0) + 1
 
