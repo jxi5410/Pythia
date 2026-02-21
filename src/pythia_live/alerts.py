@@ -1,6 +1,6 @@
 """
 Telegram Alert System — Intelligence Briefing Format
-Real-time notifications for trading signals
+Real-time notifications for trading signals + Query commands
 """
 import requests
 from typing import Optional, List
@@ -8,6 +8,7 @@ from datetime import datetime
 
 from .database import PythiaDB
 from .detector import Signal
+from .telegram_query import TelegramQueryHandler
 
 
 class TelegramAlerter:
@@ -52,6 +53,15 @@ class TelegramAlerter:
         self.db = db
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.enabled = bool(bot_token)
+        self.query_handler = TelegramQueryHandler(db.db_path) if db else None
+
+    def handle_command(self, command: str, args: str = "") -> bool:
+        """Handle query commands from Telegram."""
+        if not self.enabled or not self.query_handler:
+            return False
+
+        response = self.query_handler.handle_command(command, args)
+        return self._send_message(response, parse_mode=None)
 
     def send_signal(self, signal: Signal, market_title: str, market_url: str = "") -> bool:
         """Send a signal alert as an intelligence briefing."""
@@ -228,16 +238,17 @@ Ready to detect alpha.
 """
         return self._send_message(message)
 
-    def _send_message(self, message: str) -> bool:
+    def _send_message(self, message: str, parse_mode: str = "HTML") -> bool:
         """Send message via Telegram API."""
         try:
             url = f"{self.base_url}/sendMessage"
             payload = {
                 "chat_id": self.chat_id,
                 "text": message,
-                "parse_mode": "HTML",
                 "disable_web_page_preview": True
             }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
 
             response = requests.post(url, json=payload, timeout=10)
             response.raise_for_status()
