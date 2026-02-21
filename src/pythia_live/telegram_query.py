@@ -19,6 +19,17 @@ from .patterns import build_patterns, find_matching_pattern, _categorize_market
 logger = logging.getLogger(__name__)
 
 
+def _fmt_ts(ts, fmt='%m/%d %H:%M'):
+    """Safely format a timestamp that might be a string or datetime."""
+    if isinstance(ts, str):
+        try:
+            from datetime import datetime
+            ts = datetime.fromisoformat(ts)
+        except:
+            return str(ts)[:16]
+    return ts.strftime(fmt) if hasattr(ts, 'strftime') else str(ts)[:16]
+
+
 class TelegramQueryHandler:
     """Handle query commands via Telegram bot."""
     
@@ -72,7 +83,7 @@ class TelegramQueryHandler:
         lines = [f"FED RATE SPIKES (≥{min_mag:.0%})", ""]
         
         for spike in fed_spikes[:5]:
-            date_str = spike.timestamp.strftime('%m/%d %H:%M')
+            date_str = _fmt_ts(spike.timestamp, '%m/%d %H:%M')
             lines.append(f"• {spike.direction.upper()} {spike.magnitude:.1%} on {date_str}")
             lines.append(f"  {spike.market_title[:50]}...")
             if spike.attributed_events:
@@ -100,7 +111,7 @@ class TelegramQueryHandler:
         lines = [f"SPIKES SIMILAR TO: {args}", f"Category: {category}", ""]
         
         for spike in similar[:5]:
-            date_str = spike.timestamp.strftime('%m/%d')
+            date_str = _fmt_ts(spike.timestamp, '%m/%d')
             lines.append(f"• {spike.direction.upper()} {spike.magnitude:.1%} ({date_str})")
             lines.append(f"  {spike.market_title[:45]}...")
             lines.append("")
@@ -123,7 +134,7 @@ class TelegramQueryHandler:
         if not spike:
             return f"Spike #{spike_id} not found."
         
-        date_str = spike.timestamp.strftime('%Y-%m-%d %H:%M')
+        date_str = _fmt_ts(spike.timestamp, '%Y-%m-%d %H:%M')
         lines = [
             f"SPIKE #{spike.id}",
             f"Market: {spike.market_title[:50]}...",
@@ -192,7 +203,7 @@ class TelegramQueryHandler:
             if time_diff <= 7200:  # 2 hours
                 correlated.append((s, time_diff))
         
-        date_str = spike.timestamp.strftime('%m/%d %H:%M')
+        date_str = _fmt_ts(spike.timestamp, '%m/%d %H:%M')
         lines = [
             f"CORRELATIONS FOR: {spike.market_title[:40]}...",
             f"Reference: {spike.direction.upper()} {spike.magnitude:.1%} on {date_str}",
