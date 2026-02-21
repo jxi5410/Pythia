@@ -21,8 +21,11 @@ from urllib.parse import quote_plus, urlparse, unquote
 
 import requests
 from bs4 import BeautifulSoup
+from email.utils import parsedate_to_datetime
 
 logger = logging.getLogger(__name__)
+
+NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Layer 1: Context Builder
@@ -54,11 +57,40 @@ def classify_market(title: str) -> str:
 
 def extract_entities_simple(title: str) -> List[str]:
     """Extract key entities from market title without LLM (fast fallback)."""
-    # Remove common filler
     stop_words = {"will", "the", "be", "in", "by", "of", "a", "an", "to", "for", "on", "is", "at", "this", "that", "it"}
     words = re.sub(r'[?!.,]', '', title).split()
     entities = [w for w in words if w.lower() not in stop_words and len(w) > 2]
     return entities[:5]
+
+
+ENTITY_PROMPT = """Extract the key searchable entities from this prediction market title.
+Return ONLY a JSON array of 3-5 specific search terms that would find news causing price moves in this market.
+
+Title: {title}
+
+Examples:
+- "Will the Fed cut rates by June 2025?" → ["Federal Reserve rate cut", "FOMC June 2025", "Jerome Powell dovish"]
+- "Bitcoin above 100K by June?" → ["Bitcoin price 100000", "BTC rally", "crypto market surge"]
+
+Return ONLY the JSON array, nothing else."""
+
+
+def extract_entities_llm(title: str, llm_call=None) -> List[str]:
+    """Extract entities using LLM for better search queries."""
+    if not llm_call:
+        return extract_entities_simple(title)
+
+    try:
+        response = llm_call(ENTITY_PROMPT.format(title=title))
+        match = re.search(r'\[.*\]', response, re.DOTALL)
+        if match:
+            entities = json.loads(match.group())
+            if isinstance(entities, list) and entities:
+                return [str(e) for e in entities[:5]]
+    except Exception as e:
+        logger.warning("LLM entity extraction failed: %s", e)
+
+    return extract_entities_simple(title)
 
 
 def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) -> List[Dict]:
@@ -85,7 +117,7 @@ def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) 
     return concurrent
 
 
-def build_spike_context(spike, all_recent_spikes=None) -> Dict:
+def build_spike_context(spike, all_recent_spikes=None, entity_llm=None) -> Dict:
     """Build full context for a spike before attribution."""
     ts = spike.timestamp
     if isinstance(ts, str):
@@ -93,10 +125,13 @@ def build_spike_context(spike, all_recent_spikes=None) -> Dict:
 
     correlated = find_concurrent_spikes(spike, all_recent_spikes or [], window_hours=2)
 
+    # Use LLM for entity extraction if available, else simple fallback
+    entities = extract_entities_llm(spike.market_title, llm_call=entity_llm)
+
     return {
         "market_title": spike.market_title,
         "category": classify_market(spike.market_title),
-        "entities": extract_entities_simple(spike.market_title),
+        "entities": entities,
         "spike": {
             "direction": spike.direction,
             "magnitude": spike.magnitude,
@@ -117,6 +152,86 @@ def build_spike_context(spike, all_recent_spikes=None) -> Dict:
 # ---------------------------------------------------------------------------
 # Layer 2: News Retrieval (free sources, temporally filtered)
 # ---------------------------------------------------------------------------
+
+def newsapi_search(query: str, from_date: str = None, to_date: str = None, max_results: int = 10) -> List[Dict]:
+    """Search NewsAPI.org (free tier: 100 req/day). Best temporal filtering."""
+    if not NEWSAPI_KEY:
+        return []
+
+    try:
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": query,
+            "apiKey": NEWSAPI_KEY,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": max_results,
+        }
+        if from_date:
+            params["from"] = from_date[:19]  # ISO format
+        if to_date:
+            params["to"] = to_date[:19]
+
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        articles = []
+        for art in data.get("articles", []):
+            articles.append({
+                "headline": (art.get("title") or "")[:200],
+                "url": art.get("url", ""),
+                "source": art.get("source", {}).get("name", ""),
+                "snippet": (art.get("description") or "")[:200],
+                "published": art.get("publishedAt", ""),
+                "retrieval_source": "newsapi",
+            })
+        return articles
+
+    except Exception as e:
+        logger.warning("NewsAPI search failed: %s", e)
+        return []
+
+
+def _parse_published_date(date_str: str) -> Optional[datetime]:
+    """Try to parse various date formats from news sources."""
+    if not date_str:
+        return None
+    try:
+        # ISO format (NewsAPI, Reddit)
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+    except:
+        pass
+    try:
+        # RFC 2822 (RSS feeds)
+        return parsedate_to_datetime(date_str).replace(tzinfo=None)
+    except:
+        pass
+    return None
+
+
+def filter_by_temporal_window(articles: List[Dict], window_start: str, window_end: str) -> List[Dict]:
+    """Keep only articles published within the temporal window."""
+    try:
+        ws = datetime.fromisoformat(window_start)
+        we = datetime.fromisoformat(window_end)
+    except:
+        return articles  # Can't parse window, return all
+
+    filtered = []
+    for art in articles:
+        pub_date = _parse_published_date(art.get("published", ""))
+        if pub_date is None:
+            # No publish date — keep it but mark as unverified
+            art["temporal_verified"] = False
+            filtered.append(art)
+        elif ws <= pub_date <= we:
+            art["temporal_verified"] = True
+            filtered.append(art)
+        # else: outside window, discard
+
+    return filtered
+
 
 def google_news_rss(query: str, max_results: int = 10) -> List[Dict]:
     """Search Google News RSS (free, no API key)."""
@@ -261,9 +376,11 @@ def retrieve_candidate_news(context: Dict) -> List[Dict]:
     """
     Fetch news from multiple free sources.
     Searches using extracted entities for better relevance.
+    Applies temporal filtering to keep only articles within spike window.
     """
     entities = context["entities"]
     category = context["category"]
+    window = context["temporal_window"]
 
     # Build targeted search queries
     entity_query = " ".join(entities[:3])
@@ -271,15 +388,26 @@ def retrieve_candidate_news(context: Dict) -> List[Dict]:
 
     candidates = []
 
-    # Source 1: Google News RSS
+    # Source 1: NewsAPI (best temporal filtering, 100 req/day free)
+    candidates += newsapi_search(
+        entity_query,
+        from_date=window["start"],
+        to_date=window["end"],
+        max_results=10,
+    )
+
+    # Source 2: Google News RSS
     candidates += google_news_rss(entity_query, max_results=8)
 
-    # Source 2: DuckDuckGo (broader search)
+    # Source 3: DuckDuckGo (broader search)
     candidates += duckduckgo_search(category_query, max_results=5)
 
-    # Source 3: Reddit (discussion/sentiment)
+    # Source 4: Reddit (discussion/sentiment)
     subreddit = SUBREDDIT_MAP.get(category, "news")
     candidates += reddit_search(entity_query, subreddit=subreddit, max_results=5)
+
+    # Temporal filtering: keep only articles within 2h window
+    candidates = filter_by_temporal_window(candidates, window["start"], window["end"])
 
     # Deduplicate by headline similarity
     seen_headlines = set()
@@ -437,7 +565,8 @@ def format_candidates(candidates: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None) -> Dict:
+def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None,
+                       extra_context: str = "") -> Dict:
     """
     Deep causal reasoning using Opus.
     
@@ -455,7 +584,10 @@ def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None) -> 
         }
 
     spike = context["spike"]
-    prompt = CAUSAL_PROMPT.format(
+    causal_prompt = CAUSAL_PROMPT
+    if extra_context:
+        causal_prompt = CAUSAL_PROMPT + extra_context
+    prompt = causal_prompt.format(
         market_title=context["market_title"],
         category=context["category"],
         direction=spike["direction"],
@@ -490,43 +622,220 @@ def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None) -> 
 
 
 # ---------------------------------------------------------------------------
-# Layer 5: Full Pipeline
+# Layer 5: Store, Learn & Feedback
 # ---------------------------------------------------------------------------
 
-def attribute_spike_v2(spike, all_recent_spikes=None, 
-                       filter_llm=None, reasoning_llm=None) -> Dict:
+FEEDBACK_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "causal_feedback.jsonl")
+
+
+def save_attribution_to_db(db, spike_id: int, result: Dict):
+    """Save full attribution result to the spike record in DB."""
+    try:
+        attr = result.get("attribution", {})
+        # Update the spike's attributed_events with v2 data
+        attributed_events = []
+        for c in result.get("top_candidates", []):
+            attributed_events.append({
+                "headline": c.get("headline", ""),
+                "source": c.get("source", ""),
+                "url": c.get("url", ""),
+                "relevance_score": c.get("relevance_score", 0),
+                "relevance_reason": c.get("relevance_reason", ""),
+                "temporal_verified": c.get("temporal_verified", False),
+            })
+
+        # Build enriched record
+        enriched = {
+            "v2_attribution": {
+                "most_likely_cause": attr.get("most_likely_cause", ""),
+                "causal_chain": attr.get("causal_chain", ""),
+                "confidence": attr.get("confidence", "LOW"),
+                "confidence_reasoning": attr.get("confidence_reasoning", ""),
+                "macro_or_idiosyncratic": attr.get("macro_or_idiosyncratic", "UNKNOWN"),
+                "expected_duration": attr.get("expected_duration", "UNKNOWN"),
+                "trading_implication": attr.get("trading_implication", ""),
+                "alternative_explanations": attr.get("alternative_explanations", []),
+            },
+            "candidates_retrieved": result.get("candidates_retrieved", 0),
+            "candidates_filtered": result.get("candidates_filtered", 0),
+            "attributed_events": attributed_events,
+        }
+
+        conn = db._get_conn()
+        conn.execute(
+            "UPDATE spike_events SET attributed_events = ? WHERE id = ?",
+            (json.dumps(enriched), spike_id)
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Attribution saved to DB for spike %d", spike_id)
+
+    except Exception as e:
+        logger.warning("Failed to save attribution to DB: %s", e)
+
+
+def check_outcome(db, spike_id: int, hours_later: int = 1) -> Optional[Dict]:
+    """
+    Check what happened to the price after the spike.
+    Call this 1h and 24h after attribution for outcome tracking.
+    """
+    try:
+        conn = db._get_conn()
+        row = conn.execute(
+            "SELECT market_id, price_after, timestamp FROM spike_events WHERE id = ?",
+            (spike_id,)
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        market_id, price_at_spike, spike_ts = row
+
+        # Get the latest price for this market
+        import pandas as pd
+        history = db.get_market_history(market_id, hours=hours_later + 1)
+        if history.empty:
+            return None
+
+        latest_price = history["yes_price"].iloc[-1]
+        price_change = latest_price - price_at_spike
+
+        outcome = {
+            "spike_id": spike_id,
+            "hours_later": hours_later,
+            "price_at_spike": price_at_spike,
+            "price_now": latest_price,
+            "price_change": price_change,
+            "sustained": abs(price_change) < 0.02,  # Move held if < 2% reversal
+            "reversed": price_change < -0.03 if price_at_spike > 0 else price_change > 0.03,
+            "checked_at": datetime.utcnow().isoformat(),
+        }
+
+        # Save outcome to DB
+        conn = db._get_conn()
+        reaction_key = f"price_{hours_later}h_later"
+        conn.execute(
+            "UPDATE spike_events SET asset_reaction = json_set(COALESCE(asset_reaction, '{}'), ?, ?) WHERE id = ?",
+            (f"$.{reaction_key}", latest_price, spike_id)
+        )
+        conn.commit()
+        conn.close()
+
+        return outcome
+
+    except Exception as e:
+        logger.warning("Outcome check failed for spike %d: %s", spike_id, e)
+        return None
+
+
+def log_feedback(spike_id: int, feedback_type: str, details: str):
+    """
+    Log human feedback on an attribution.
+    
+    feedback_type: "correct", "wrong", "partial", "irrelevant"
+    details: free text explanation
+    """
+    entry = {
+        "spike_id": spike_id,
+        "feedback_type": feedback_type,
+        "details": details,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+    os.makedirs(os.path.dirname(FEEDBACK_FILE), exist_ok=True)
+    with open(FEEDBACK_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    logger.info("Feedback logged for spike %d: %s", spike_id, feedback_type)
+
+
+def load_feedback_corrections() -> List[Dict]:
+    """Load all feedback for use in improving future prompts."""
+    if not os.path.exists(FEEDBACK_FILE):
+        return []
+
+    entries = []
+    with open(FEEDBACK_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    return entries
+
+
+def get_feedback_summary() -> str:
+    """Summarize feedback patterns for injection into prompts."""
+    entries = load_feedback_corrections()
+    if not entries:
+        return ""
+
+    wrong = [e for e in entries if e["feedback_type"] == "wrong"]
+    correct = [e for e in entries if e["feedback_type"] == "correct"]
+
+    if not wrong:
+        return ""
+
+    # Build correction hints from wrong attributions
+    corrections = []
+    for w in wrong[-5:]:  # Last 5 corrections
+        corrections.append(f"- Spike #{w['spike_id']}: {w['details']}")
+
+    return (
+        "\nIMPORTANT CORRECTIONS FROM PAST MISTAKES:\n"
+        + "\n".join(corrections)
+        + "\nAvoid repeating these attribution errors.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full Pipeline
+# ---------------------------------------------------------------------------
+
+def attribute_spike_v2(spike, all_recent_spikes=None,
+                       entity_llm=None, filter_llm=None, reasoning_llm=None,
+                       db=None) -> Dict:
     """
     Full 5-layer causal attribution pipeline.
-    
+
     Args:
         spike: SpikeEvent to attribute
         all_recent_spikes: List of recent spikes for correlation detection
+        entity_llm: function(prompt) -> str for Layer 1 entity extraction (Sonnet)
         filter_llm: function(prompt) -> str for Layer 3 (Sonnet)
         reasoning_llm: function(prompt) -> str for Layer 4 (Opus)
-    
+        db: PythiaDB instance for Layer 5 storage
+
     Returns:
         Structured attribution dict with cause, confidence, reasoning.
     """
-    # Layer 1: Context
-    context = build_spike_context(spike, all_recent_spikes or [])
+    # Layer 1: Context (with LLM entity extraction)
+    context = build_spike_context(spike, all_recent_spikes or [], entity_llm=entity_llm)
     logger.info("Context built: category=%s, entities=%s, correlated=%d",
                 context["category"], context["entities"], len(context["correlated_spikes"]))
 
-    # Layer 2: News Retrieval
+    # Layer 2: News Retrieval (NewsAPI + Google News + DDG + Reddit, temporally filtered)
     candidates = retrieve_candidate_news(context)
-    logger.info("Retrieved %d candidate articles", len(candidates))
+    logger.info("Retrieved %d candidate articles (temporally filtered)", len(candidates))
 
     # Layer 3: Filter (Sonnet)
     filtered = filter_candidates(context, candidates, llm_call=filter_llm)
     logger.info("Filtered to %d relevant articles", len(filtered))
 
+    # Inject feedback corrections into reasoning prompt if available
+    feedback_hint = get_feedback_summary()
+
     # Layer 4: Causal Reasoning (Opus)
-    attribution = reason_about_cause(context, filtered, llm_call=reasoning_llm)
+    attribution = reason_about_cause(context, filtered, llm_call=reasoning_llm,
+                                     extra_context=feedback_hint)
     logger.info("Attribution: %s (confidence: %s)",
                 attribution.get("most_likely_cause", "?")[:60],
                 attribution.get("confidence", "?"))
 
-    # Layer 5: Package result
+    # Layer 5: Package and store
     result = {
         "spike_id": spike.id,
         "context": context,
@@ -536,6 +845,10 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
         "attribution": attribution,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+    # Save to DB if available
+    if db:
+        save_attribution_to_db(db, spike.id, result)
 
     return result
 

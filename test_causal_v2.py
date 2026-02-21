@@ -49,6 +49,7 @@ def test_full_pipeline(market_title: str, direction: str = "up", magnitude: floa
     result = attribute_spike_v2(
         spike,
         all_recent_spikes=[],
+        entity_llm=sonnet_call,
         filter_llm=sonnet_call,
         reasoning_llm=opus_call,
     )

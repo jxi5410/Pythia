@@ -246,3 +246,35 @@ def get_spike_history(db: PythiaDB, market_id: str = None, asset_class: str = No
 def tag_spike(db: PythiaDB, spike_id: int, manual_tag: str):
     """Manually tag a spike event with a cause description."""
     db.update_spike_tag(spike_id, manual_tag)
+
+
+def attribute_spike_v2_wrapper(spike: SpikeEvent, db: PythiaDB,
+                                all_recent_spikes: List[SpikeEvent] = None) -> SpikeEvent:
+    """
+    V2 attribution wrapper — drop-in replacement for attribute_spike().
+    Uses the full 5-layer causal pipeline with LLM reasoning.
+    Falls back to v1 if LLM is unavailable.
+    """
+    try:
+        from .causal_v2 import attribute_spike_v2
+        from .llm_integration import sonnet_call, opus_call
+
+        result = attribute_spike_v2(
+            spike,
+            all_recent_spikes=all_recent_spikes or [],
+            entity_llm=sonnet_call,
+            filter_llm=sonnet_call,
+            reasoning_llm=opus_call,
+            db=db,
+        )
+
+        # Update spike with v2 attribution data
+        attr = result.get("attribution", {})
+        spike.attributed_events = result.get("top_candidates", [])
+        spike.manual_tag = attr.get("most_likely_cause", "")
+
+        return spike
+
+    except Exception as e:
+        logger.warning("V2 attribution failed, falling back to v1: %s", e)
+        return attribute_spike(spike)
