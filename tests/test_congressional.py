@@ -56,6 +56,7 @@ class TestPoliticianProfile(unittest.TestCase):
         self.assertEqual(p["party"], "?")
 
 
+@patch("pythia_live.congressional._llm_refine_matches", side_effect=lambda all_m, amb: all_m)
 class TestMatchTradesToMarkets(unittest.TestCase):
     def setUp(self):
         self.trades = [
@@ -100,14 +101,14 @@ class TestMatchTradesToMarkets(unittest.TestCase):
             },
         ]
 
-    def test_basic_matching(self):
+    def test_basic_matching(self, _mock_llm):
         matches = match_trades_to_markets(self.trades, self.markets)
         self.assertTrue(len(matches) > 0)
         # NVDA should match AI market
         nvda_matches = [m for m in matches if m["trade"]["ticker"] == "NVDA"]
         self.assertTrue(any("AI" in m["explanation"] for m in nvda_matches))
 
-    def test_defense_match(self):
+    def test_defense_match(self, _mock_llm):
         matches = match_trades_to_markets(self.trades, self.markets)
         lmt_matches = [m for m in matches if m["trade"]["ticker"] == "LMT"]
         self.assertTrue(len(lmt_matches) > 0)
@@ -115,14 +116,14 @@ class TestMatchTradesToMarkets(unittest.TestCase):
         defense_match = [m for m in lmt_matches if "defense" in m["market"]["question"].lower()]
         self.assertTrue(len(defense_match) > 0)
 
-    def test_no_false_positives(self):
+    def test_no_false_positives(self, _mock_llm):
         matches = match_trades_to_markets(self.trades, self.markets)
         # Bitcoin market shouldn't match either trade with high score
         btc_matches = [m for m in matches if "Bitcoin" in m["market"]["question"]]
         for m in btc_matches:
             self.assertLess(m["relevance_score"], 0.5)
 
-    def test_empty_inputs(self):
+    def test_empty_inputs(self, _mock_llm):
         self.assertEqual(match_trades_to_markets([], self.markets), [])
         self.assertEqual(match_trades_to_markets(self.trades, []), [])
 
