@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
 from .database import PythiaDB
+from .pattern_integration import PatternLibrary
 
 
 @dataclass
@@ -47,6 +48,7 @@ class SignalDetector:
         self.db = db
         self.config = config
         self.recent_signals = {}  # Cooldown tracking
+        self.pattern_library = PatternLibrary()  # Becker-derived patterns
 
     def detect_all(self, market_data: Dict, price_history: pd.DataFrame,
                    trades: Optional[List[Dict]] = None) -> List[Signal]:
@@ -97,6 +99,10 @@ class SignalDetector:
         # Update cooldown if signals found
         if signals:
             self.recent_signals[market_id] = datetime.now()
+
+        # Enhance signals with pattern library context
+        if self.pattern_library.data:
+            signals = [self.pattern_library.enhance_signal(s) for s in signals]
 
         return signals
 
