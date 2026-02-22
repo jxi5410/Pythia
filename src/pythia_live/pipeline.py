@@ -20,6 +20,10 @@ from .detector import SignalDetector, Signal
 from .causal_v2 import attribute_spike_v2
 from .config import Config
 from .equities import correlate_spike, format_correlation_alert
+from .confluence import (
+    ConfluenceScorer, adapt_equities, adapt_causal,
+    save_confluence_event, format_confluence_alert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +72,7 @@ class Pipeline:
         self.detector = SignalDetector(self.db, vars(self.config))
         self.dry_run = dry_run
         self._recent_spike_proxies: List[SpikeProxy] = []
+        self._confluence_scorer = ConfluenceScorer(time_window_hours=4, min_layers=3)
 
     def run_cycle(self) -> List[Dict]:
         """Run one polling cycle. Returns list of alert dicts."""
@@ -211,6 +216,40 @@ class Pipeline:
 
             # Output as JSON line to stdout
             print(json.dumps(alert), flush=True)
+
+        # 4. Confluence check — feed correlation and causal results
+        if not self.dry_run:
+            for alert in alerts:
+                corr = alert.get("correlation")
+                if corr:
+                    sig = adapt_equities(corr)
+                    if sig:
+                        self._confluence_scorer.ingest_signal(sig)
+                attr = alert.get("attribution")
+                if attr:
+                    sig = adapt_causal({"attribution": attr})
+                    if sig:
+                        self._confluence_scorer.ingest_signal(sig)
+
+            confluence_events = self._confluence_scorer.check_confluence()
+            for ce in confluence_events:
+                logger.info("Confluence event: %s %s (score=%.2f, layers=%d)",
+                            ce.event_category, ce.direction,
+                            ce.confluence_score, ce.layer_count)
+                try:
+                    save_confluence_event(self.db, ce)
+                except Exception as e:
+                    logger.warning("Failed to save confluence event: %s", e)
+                print(json.dumps({
+                    "type": "confluence",
+                    "timestamp": ce.timestamp.isoformat(),
+                    "event_category": ce.event_category,
+                    "direction": ce.direction,
+                    "confluence_score": ce.confluence_score,
+                    "layer_count": ce.layer_count,
+                    "layers": ce.layers,
+                    "alert_text": ce.alert_text,
+                }), flush=True)
 
         # Also report non-spike signals briefly
         other_signals = [s for s in all_signals if s not in high_signals]

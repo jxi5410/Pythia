@@ -172,6 +172,37 @@ class PythiaDB:
                 ON spike_events(timestamp)
             """)
 
+            # --- Confluence events (v0.6) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS confluence_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_category TEXT,
+                    direction TEXT,
+                    confluence_score REAL,
+                    layer_count INTEGER,
+                    layers TEXT DEFAULT '[]',
+                    confidence REAL,
+                    timestamp TIMESTAMP,
+                    historical_hit_rate REAL DEFAULT 0.0,
+                    suggested_assets TEXT DEFAULT '[]',
+                    alert_text TEXT DEFAULT '',
+                    signals_json TEXT DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_confluence_time
+                ON confluence_events(timestamp)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_confluence_category
+                ON confluence_events(event_category)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_confluence_score
+                ON confluence_events(confluence_score)
+            """)
+
             conn.commit()
 
     # ------------------------------------------------------------------

@@ -8,9 +8,10 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .detector import Signal
+if TYPE_CHECKING:
+    from .detector import Signal
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,7 @@ class PatternLibrary:
 
         return len(warnings) == 0 or True, warnings
 
-    def enhance_signal(self, signal: Signal) -> Signal:
+    def enhance_signal(self, signal) -> "Signal":
         """
         Enhance a detected signal with pattern library context.
 

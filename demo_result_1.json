@@ -1,0 +1,74 @@
+{
+  "spike_id": 2,
+  "context": {
+    "market_title": "Will the Fed cut rates in March 2025?",
+    "category": "fed_rate",
+    "entities": [
+      "Federal Reserve rate cut March 2025",
+      "FOMC March meeting",
+      "Jerome Powell interest rates",
+      "Fed funds rate decision"
+    ],
+    "spike": {
+      "direction": "down",
+      "magnitude": 0.12,
+      "timestamp": "2025-01-29T19:00:00",
+      "price_before": 0.35,
+      "price_after": 0.23,
+      "volume": 85000
+    },
+    "temporal_window": {
+      "start": "2025-01-29T17:00:00",
+      "end": "2025-01-29T19:30:00"
+    },
+    "correlated_spikes": [],
+    "is_macro": false
+  },
+  "candidates_retrieved": 5,
+  "candidates_filtered": 3,
+  "top_candidates": [
+    {
+      "headline": "March 2025 Fed meeting: Interest rates kept steady, slower economic ...",
+      "url": "https://www.jpmorgan.com/insights/markets-and-economy/economy/fed-meeting-march-2025",
+      "source": "jpmorgan.com",
+      "snippet": "Key takeaways TheFederalReserve(Fed) unanimously voted to holdinterestratessteady at 4.5% for a second straightmeeting, following three consecutiveratereductions that began last September. TheFed'slat",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 8,
+      "relevance_reason": "Confirms Fed unanimously held rates steady at 4.5%, directly relevant to the No outcome"
+    },
+    {
+      "headline": "Fed rate decision March 2025: Fed holds interest rates steady - CNBC",
+      "url": "https://www.cnbc.com/2025/03/19/fed-rate-decision-march-2025.html",
+      "source": "cnbc.com",
+      "snippet": "FederalReserveChairmanJeromePowelldelivers remarks at a news conference following aFederalOpen Market Committee (FOMC)meetingat theFederalReserveonMarch19,2025in Washington, DC.",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 7,
+      "relevance_reason": "Direct report of Fed holding rates in March 2025, explains why market moved down"
+    },
+    {
+      "headline": "Fed Likely Won't Cut Rates At Next March 19 Meeting, - Forbes",
+      "url": "https://www.forbes.com/sites/simonmoore/2025/03/10/fed-likely-wont-cut-rates-on-march-19-heres-what-to-look-for/",
+      "source": "forbes.com",
+      "snippet": "FederalReserveBoard ChairmanJeromePowelltestifies before the House Financial Services Committee. AninterestratecutinMarch, when theFederalOpen Market Committee next meets is not ...",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 7,
+      "relevance_reason": "Forbes forecasting no cut at March 19 meeting, aligns with spike direction"
+    }
+  ],
+  "attribution": {
+    "most_likely_cause": "The Fed unanimously held rates steady at 4.5% in March 2025, confirming no cut and driving the 'Yes' probability down from 0.35 to 0.23.",
+    "causal_chain": "Fed March 2025 FOMC decision \u2192 unanimous hold at 4.5%, no rate cut delivered \u2192 market resolved or repriced sharply toward 'No', collapsing the 'Yes' probability by 34%",
+    "confidence": "HIGH",
+    "confidence_reasoning": "Two independent primary sources (JPMorgan, CNBC) directly confirm the Fed held rates steady in March 2025, and a third (Forbes) anticipated the hold beforehand. The spike direction (down) is fully consistent with a 'No' outcome being confirmed. The timing at 19:00 UTC on 2025-01-29 likely reflects pre-meeting guidance or FOMC communication that firmed up market expectations against a cut. Evidence is specific, multi-sourced, and directionally coherent.",
+    "macro_or_idiosyncratic": "MACRO",
+    "macro_reasoning": "Fed rate decisions are top-tier macro events affecting rates, equities, credit, and FX globally. This is not idiosyncratic to a single asset or sector \u2014 it reflects the central bank's policy stance and broader economic conditions.",
+    "expected_duration": "SUSTAINED",
+    "duration_reasoning": "Once the Fed confirmed a hold and markets repriced expectations, the move is unlikely to reverse unless a subsequent FOMC meeting or data surprise opens the door to cuts again. A confirmed policy outcome is a fundamental re-anchoring, not a liquidity or sentiment artifact.",
+    "trading_implication": "Traders should treat this as a resolved or near-resolved informational event. With 'Yes' at 0.23, any remaining premium reflects residual uncertainty about emergency cuts or future meetings \u2014 not the March outcome specifically. If this market covers only the March meeting, fair value is near zero. If it covers a broader window, monitor incoming inflation and labor data for repricing catalysts.",
+    "alternative_explanations": []
+  },
+  "timestamp": "2026-02-21T21:48:43.017989"
+}

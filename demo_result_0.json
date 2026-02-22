@@ -1,0 +1,78 @@
+{
+  "spike_id": 1,
+  "context": {
+    "market_title": "Will the Supreme Court block Trump tariffs?",
+    "category": "election",
+    "entities": [
+      "Supreme Court Trump tariffs",
+      "tariff legal challenge",
+      "trade war court ruling",
+      "Supreme Court executive power",
+      "tariff injunction"
+    ],
+    "spike": {
+      "direction": "up",
+      "magnitude": 0.18,
+      "timestamp": "2026-02-21T11:00:00",
+      "price_before": 0.25,
+      "price_after": 0.43,
+      "volume": 120000
+    },
+    "temporal_window": {
+      "start": "2026-02-21T09:00:00",
+      "end": "2026-02-21T11:30:00"
+    },
+    "correlated_spikes": [],
+    "is_macro": false
+  },
+  "candidates_retrieved": 10,
+  "candidates_filtered": 5,
+  "top_candidates": [
+    {
+      "headline": "Trump overstepped executive power by imposing tariffs, supreme court rules",
+      "url": "https://www.theguardian.com/us-news/2026/feb/20/trump-supreme-court-tariffs-ruling",
+      "source": "theguardian.com",
+      "snippet": "The USsupremecourtdeclared many of DonaldTrump'stariffsillegal on Friday, in a sharp rebuke that topples a key pillar of the president's aggressive economic agenda. In a 6-3ruling, the ...",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 10,
+      "relevance_reason": "Supreme Court rules Trump tariffs illegal \u2014 directly explains the market spike"
+    },
+    {
+      "headline": "Supreme Court strikes down Trump's sweeping tariffs | AP News",
+      "url": "https://apnews.com/article/supreme-court-tariffs-trump-0485fcda30a7310501123e4931dba3f9",
+      "source": "apnews.com",
+      "snippet": "Thecourt'srulingfoundtariffsthatTrumpimposed under an emergency powers law were unconstitutional, including the sweeping \"reciprocal\"tariffshe levied on nearly every other country.Trumpappointed three",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 10,
+      "relevance_reason": "AP News report on Supreme Court striking down Trump's tariffs \u2014 exact event causing spike"
+    },
+    {
+      "headline": "Supreme Court's Tariff Ruling and Trump's Immediate New Levies Add New ...",
+      "url": "https://www.nytimes.com/live/2026/02/20/us/trump-tariffs-supreme-court",
+      "source": "nytimes.com",
+      "snippet": "SupremeCourt'sTariffRulingandTrump'sImmediate New Levies Add New Uncertainty in GlobalTradeThe decision is a major setback for PresidentTrump, who responded by imposing a 10 percent ...",
+      "retrieval_source": "duckduckgo",
+      "temporal_verified": false,
+      "relevance_score": 9,
+      "relevance_reason": "Direct coverage of Supreme Court tariff ruling and its immediate market implications"
+    }
+  ],
+  "attribution": {
+    "most_likely_cause": "The Supreme Court issued a ruling striking down or significantly limiting Trump's tariff authority, directly validating the market's probability of judicial intervention.",
+    "causal_chain": "Supreme Court rules Trump tariffs exceed executive authority \u2192 AP News, Guardian, Reuters publish simultaneous breaking coverage \u2192 traders reprice probability of tariff blockage from 25% to 43% \u2192 $120K volume spike confirms institutional repositioning",
+    "confidence": "HIGH",
+    "confidence_reasoning": "Multiple top-tier, independent sources (AP News, Guardian, NYT, Reuters, The Conversation) all report the same specific event \u2014 a Supreme Court ruling against Trump tariffs \u2014 with high relevance scores (9-10/10). The causal link is direct: the market literally asks 'Will the Supreme Court block Trump tariffs?' and the Court apparently did exactly that. Concurrent market isolation (0 other markets moved) further confirms this is event-specific, not macro noise.",
+    "macro_or_idiosyncratic": "IDIOSYNCRATIC",
+    "macro_reasoning": "No concurrent market moves were detected in the 2-hour window, ruling out a broad macro catalyst. This is a single-market legal event \u2014 a judicial ruling on executive trade authority \u2014 not a systemic economic signal like inflation data or Fed policy.",
+    "expected_duration": "SUSTAINED",
+    "duration_reasoning": "A Supreme Court ruling is a durable legal fact, not a rumor or temporary sentiment shift. However, the Reuters headline notes Trump is 'trying another tariff route' after the decision, suggesting the legal battle may continue. The new equilibrium (~0.43) likely holds unless SCOTUS scope is narrower than reported or Trump finds a valid workaround that traders view as equivalent.",
+    "trading_implication": "The 18-point move already prices in the core ruling. Key residual risks: (1) whether the ruling is narrow (specific tariff mechanism) vs. broad (general executive tariff authority) \u2014 check the NYT/Reuters detail on 'key carve-outs'; (2) Trump's alternative tariff route could partially neutralize the ruling, compressing the price back toward 0.35; (3) if the ruling is appealed or stayed, sharp reversal likely. Traders should not chase at 0.43 without reading the ruling's scope.",
+    "alternative_explanations": [
+      "A lower court injunction (not SCOTUS) was misattributed to the Supreme Court in early headlines \u2014 less likely given AP News specificity",
+      "An oral argument or procedural order (not a final ruling) was interpreted as a decision \u2014 possible if headlines are from a live blog misread"
+    ]
+  },
+  "timestamp": "2026-02-21T21:47:21.919072"
+}
