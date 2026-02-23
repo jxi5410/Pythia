@@ -43,6 +43,12 @@ try:
 except ImportError:
     HAS_KALSHI = False
 
+try:
+    from .connectors.manifold import ManifoldConnector
+    HAS_MANIFOLD = True
+except ImportError:
+    HAS_MANIFOLD = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,12 +78,17 @@ class PythiaLive:
             self.db
         )
 
-        # Initialize connectors
+        # Initialize connectors (priority order: Kalshi > Manifold > Polymarket)
         self.connectors = {}
-        if HAS_POLYGON:
-            self.connectors['polymarket'] = PolymarketConnector()
         if HAS_KALSHI:
             self.connectors['kalshi'] = KalshiConnector()
+        if HAS_MANIFOLD:
+            self.connectors['manifold'] = ManifoldConnector()
+        if HAS_POLYGON:
+            self.connectors['polymarket'] = PolymarketConnector()
+        
+        # Source health tracking
+        self.source_health = {source: {"last_success": None, "consecutive_failures": 0} for source in self.connectors.keys()}
 
         self.running = False
         self.cycle_count = 0

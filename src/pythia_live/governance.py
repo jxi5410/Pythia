@@ -91,16 +91,22 @@ class GovernanceConfig:
     def __post_init__(self):
         if self.allowed_data_sources is None:
             self.allowed_data_sources = [
+                # Prediction markets (primary data)
+                "kalshi.com",  # CFTC-regulated, institutional
+                "manifold.markets",  # Open-source, community
+                "polymarket.com",  # Liquidity leader (backup)
+                # News sources (causal attribution)
                 "newsapi.org",
-                "polymarket.com",
-                "kalshi.com",
-                "twitter.com",
+                "twitter.com",  # Via AIsa API
                 "cnn.com",
                 "bbc.com",
                 "reuters.com",
                 "bloomberg.com",
                 "wsj.com",
-                "ft.com"
+                "ft.com",
+                "google.com",  # Google News
+                "duckduckgo.com",  # DuckDuckGo News
+                "reddit.com",  # r/MachineLearning, r/Economics
             ]
 
 
