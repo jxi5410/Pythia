@@ -66,20 +66,23 @@ class ManifoldConnector:
         Returns normalised market dicts compatible with PythiaDB.
         """
         try:
-            # Manifold API supports various filters
+            # Manifold API - simple params only
             params = {
                 "limit": min(limit, 1000),
-                "sort": "liquidity",  # Get most liquid markets first
-                "filter": "open",  # Only open markets
+                # Note: Manifold doesn't support 'sort' or 'filter' params in v0 API
+                # Returns all markets, we'll filter client-side
             }
             resp = _request_with_retry(self.client, "GET",
                                        f"{self.BASE_URL}/markets", params=params)
             raw_markets = resp.json()
 
-            # Filter for real-money markets only (optional - can keep play-money for volume)
-            # real_money_markets = [m for m in raw_markets if m.get('isRealMoney') or m.get('outcomeType') == 'BINARY']
+            # Filter for open BINARY markets only (skip resolved, non-binary)
+            open_markets = [
+                m for m in raw_markets 
+                if not m.get('isResolved', False) and m.get('outcomeType') == 'BINARY'
+            ]
             
-            return [self._normalise_market(m) for m in raw_markets[:limit]]
+            return [self._normalise_market(m) for m in open_markets[:limit]]
 
         except Exception as exc:
             logger.error("Manifold get_active_markets failed: %s", exc)
@@ -147,6 +150,15 @@ class ManifoldConnector:
         except Exception as exc:
             logger.error("Manifold get_market_bets(%s) failed: %s", market_id, exc)
             return []
+
+    def get_recent_trades(self, limit: int = 100) -> List[Dict]:
+        """
+        Fetch recent bets across all markets.
+        Note: Manifold v0 API doesn't have a global trades endpoint,
+        so this returns empty list. Use get_market_bets for specific markets.
+        """
+        logger.warning("Manifold doesn't support global trades endpoint - use get_market_bets instead")
+        return []
 
     # ------------------------------------------------------------------
     # Normalisation helpers
