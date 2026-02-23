@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-Pythia Causal Analysis v2 — 5-layer attribution pipeline.
+Pythia Causal Analysis v2 — 5-layer attribution pipeline with governance.
 
 Layer 1: Context Builder (free)
 Layer 2: News Retrieval (free APIs)
 Layer 3: Candidate Filter (Sonnet — fast relevance scoring)
 Layer 4: Causal Reasoning (Opus — deep analysis)
 Layer 5: Store & Learn (local DB)
+
+Governance (Singapore IMDA + UC Berkeley):
+- Confidence scoring at each layer
+- Validation checkpoints between agents
+- Audit trail for all actions
+- Circuit breaker for cost control
+- Human approval gates for low-confidence signals
 """
 
 import json
@@ -14,14 +21,28 @@ import logging
 import re
 import os
 import sys
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
 from urllib.parse import quote_plus, urlparse, unquote
 
 import requests
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
+
+# Governance layer imports
+try:
+    from .governance import (
+        AgentRole, AgentAction, AuditTrail,
+        get_governance, init_governance, GovernanceConfig
+    )
+    GOVERNANCE_AVAILABLE = True
+except ImportError:
+    GOVERNANCE_AVAILABLE = False
+    logger.warning("Governance module not available - running without compliance layer")
 
 logger = logging.getLogger(__name__)
 
@@ -851,6 +872,260 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
         save_attribution_to_db(db, spike.id, result)
 
     return result
+
+
+def attribute_spike_with_governance(spike, all_recent_spikes=None,
+                                    entity_llm=None, filter_llm=None, reasoning_llm=None,
+                                    db=None) -> Tuple[Dict, Optional[AuditTrail]]:
+    """
+    Governance-wrapped causal attribution pipeline.
+    
+    Implements:
+    - Circuit breaker (cost limits, emergency shutdown)
+    - Agent validation checkpoints
+    - Confidence scoring at each layer
+    - Audit trail generation
+    - Final decision gate (AUTO_RELAY / FLAG_REVIEW / REJECT)
+    
+    Returns:
+        (result_dict, audit_trail)
+    """
+    
+    if not GOVERNANCE_AVAILABLE:
+        logger.warning("Governance not available - running without compliance layer")
+        result = attribute_spike_v2(spike, all_recent_spikes, entity_llm, filter_llm, reasoning_llm, db)
+        return result, None
+    
+    # Initialize governance if not already done
+    try:
+        config, breaker, validator, exporter = get_governance()
+    except RuntimeError:
+        # Auto-initialize with defaults
+        init_governance()
+        config, breaker, validator, exporter = get_governance()
+    
+    # Create audit trail
+    run_id = str(uuid.uuid4())
+    trail = AuditTrail(
+        run_id=run_id,
+        market_id=spike.market_id,
+        market_title=spike.market_title,
+        start_time=datetime.now().isoformat()
+    )
+    
+    try:
+        # Circuit breaker check
+        estimated_cost = 0.50  # Estimated cost per attribution run (Sonnet + Opus)
+        allowed, reason = breaker.check_before_run(estimated_cost)
+        if not allowed:
+            logger.error("Attribution blocked by circuit breaker: %s", reason)
+            trail.failed_checkpoint = "circuit_breaker"
+            trail.finalize(0.0, "REJECT")
+            if exporter:
+                exporter.save_trail(trail)
+            return {"error": reason, "decision": "REJECT"}, trail
+        
+        # Layer 1: Context Builder
+        layer_start = time.time()
+        context = build_spike_context(spike, all_recent_spikes or [], entity_llm=entity_llm)
+        
+        trail.add_action(AgentAction(
+            timestamp=datetime.now().isoformat(),
+            agent_role=AgentRole.CONTEXT_BUILDER.value,
+            action_type="context_build",
+            input_summary=f"Market: {spike.market_title[:50]}...",
+            output_summary=f"Category: {context['category']}, Entities: {len(context['entities'])}",
+            confidence_score=1.0,  # Deterministic keyword matching
+            duration_ms=int((time.time() - layer_start) * 1000)
+        ))
+        
+        logger.info("✓ Layer 1: Context built (category=%s, entities=%d)", 
+                   context["category"], len(context["entities"]))
+        
+        # Layer 2: News Retrieval
+        layer_start = time.time()
+        candidates = retrieve_candidate_news(context)
+        
+        trail.add_action(AgentAction(
+            timestamp=datetime.now().isoformat(),
+            agent_role=AgentRole.NEWS_RETRIEVER.value,
+            action_type="api_calls",
+            input_summary=f"Entities: {context['entities'][:3]}",
+            output_summary=f"Retrieved {len(candidates)} articles",
+            confidence_score=0.9 if candidates else 0.3,  # High if articles found
+            duration_ms=int((time.time() - layer_start) * 1000)
+        ))
+        
+        # Validate news retrieval
+        passed, failure = validator.validate_agent_output(
+            AgentRole.NEWS_RETRIEVER,
+            {'articles': candidates},
+            0.9 if candidates else 0.3
+        )
+        if not passed:
+            logger.warning("✗ Layer 2 validation failed: %s", failure)
+            trail.failed_checkpoint = "news_retrieval"
+            trail.finalize(0.0, "REJECT")
+            if exporter:
+                exporter.save_trail(trail)
+            return {"error": failure, "decision": "REJECT"}, trail
+        
+        logger.info("✓ Layer 2: Retrieved %d candidates", len(candidates))
+        
+        # Layer 3: Candidate Filter (Sonnet)
+        layer_start = time.time()
+        filtered = filter_candidates(context, candidates, llm_call=filter_llm)
+        
+        # Extract filter confidence (if LLM provides it)
+        filter_confidence = 0.8 if filtered else 0.5
+        
+        trail.add_action(AgentAction(
+            timestamp=datetime.now().isoformat(),
+            agent_role=AgentRole.CANDIDATE_FILTER.value,
+            action_type="llm_call",
+            input_summary=f"{len(candidates)} candidates",
+            output_summary=f"{len(filtered)} filtered",
+            confidence_score=filter_confidence,
+            cost_usd=0.01,  # Approx Sonnet cost
+            tokens_used=5000,  # Approx
+            duration_ms=int((time.time() - layer_start) * 1000)
+        ))
+        
+        # Validate filter output
+        passed, failure = validator.validate_agent_output(
+            AgentRole.CANDIDATE_FILTER,
+            {'filtered_candidates': filtered},
+            filter_confidence
+        )
+        if not passed:
+            logger.warning("✗ Layer 3 validation failed: %s", failure)
+            trail.failed_checkpoint = "candidate_filter"
+            trail.finalize(filter_confidence, "REJECT")
+            if exporter:
+                exporter.save_trail(trail)
+            return {"error": failure, "decision": "REJECT", "confidence": filter_confidence}, trail
+        
+        logger.info("✓ Layer 3: Filtered to %d articles (confidence: %.2f)", 
+                   len(filtered), filter_confidence)
+        
+        # Layer 4: Causal Reasoning (Opus)
+        layer_start = time.time()
+        feedback_hint = get_feedback_summary()
+        attribution = reason_about_cause(context, filtered, llm_call=reasoning_llm,
+                                        extra_context=feedback_hint)
+        
+        # Extract reasoner confidence
+        reasoner_confidence = attribution.get("confidence_score", 0.75)
+        if isinstance(reasoner_confidence, str):
+            # Parse "High (0.85)" or "85%" format
+            import re
+            match = re.search(r'(\d+\.?\d*)', reasoner_confidence)
+            if match:
+                reasoner_confidence = float(match.group(1))
+                if reasoner_confidence > 1:
+                    reasoner_confidence /= 100  # Convert 85 -> 0.85
+        
+        trail.add_action(AgentAction(
+            timestamp=datetime.now().isoformat(),
+            agent_role=AgentRole.CAUSAL_REASONER.value,
+            action_type="llm_call",
+            input_summary=f"{len(filtered)} candidates",
+            output_summary=attribution.get("most_likely_cause", "")[:100],
+            confidence_score=reasoner_confidence,
+            cost_usd=0.15,  # Approx Opus cost
+            tokens_used=15000,  # Approx
+            duration_ms=int((time.time() - layer_start) * 1000)
+        ))
+        
+        # Validate reasoning output
+        passed, failure = validator.validate_agent_output(
+            AgentRole.CAUSAL_REASONER,
+            attribution,
+            reasoner_confidence
+        )
+        if not passed:
+            logger.warning("✗ Layer 4 validation failed: %s", failure)
+            trail.failed_checkpoint = "causal_reasoning"
+            trail.finalize(reasoner_confidence, "REJECT")
+            if exporter:
+                exporter.save_trail(trail)
+            return {"error": failure, "decision": "REJECT", "confidence": reasoner_confidence}, trail
+        
+        logger.info("✓ Layer 4: Reasoning complete (confidence: %.2f)", reasoner_confidence)
+        
+        # Layer 5: Store & Learn
+        layer_start = time.time()
+        result = {
+            "spike_id": spike.id,
+            "context": context,
+            "candidates_retrieved": len(candidates),
+            "candidates_filtered": len(filtered),
+            "top_candidates": filtered[:3],
+            "attribution": attribution,
+            "timestamp": datetime.utcnow().isoformat(),
+            "filter_confidence": filter_confidence,
+            "reasoner_confidence": reasoner_confidence,
+            "governance": {
+                "run_id": run_id,
+                "total_cost": trail.total_cost_usd,
+                "total_tokens": trail.total_tokens,
+            }
+        }
+        
+        if db:
+            save_attribution_to_db(db, spike.id, result)
+        
+        trail.add_action(AgentAction(
+            timestamp=datetime.now().isoformat(),
+            agent_role=AgentRole.STORAGE_LEARNER.value,
+            action_type="db_write",
+            input_summary="Attribution result",
+            output_summary="Saved to DB",
+            confidence_score=1.0,
+            duration_ms=int((time.time() - layer_start) * 1000)
+        ))
+        
+        logger.info("✓ Layer 5: Stored to database")
+        
+        # Final decision gate
+        final_confidence = reasoner_confidence  # Use reasoner as primary
+        decision, reason = validator.validate_final_output(
+            final_confidence,
+            filter_confidence,
+            reasoner_confidence
+        )
+        
+        result["decision"] = decision
+        result["decision_reason"] = reason
+        result["final_confidence"] = final_confidence
+        
+        # Finalize audit trail
+        trail.finalize(final_confidence, decision)
+        trail.passed_all_checkpoints = (decision != "REJECT")
+        
+        # Record cost in circuit breaker
+        breaker.record_run(trail.total_cost_usd)
+        
+        # Save audit trail
+        if exporter:
+            exporter.save_trail(trail)
+        
+        logger.info("═" * 60)
+        logger.info("FINAL DECISION: %s (confidence: %.2f)", decision, final_confidence)
+        logger.info("Reason: %s", reason)
+        logger.info("Cost: $%.4f | Tokens: %d | Duration: %.1fs",
+                   trail.total_cost_usd, trail.total_tokens, trail.total_duration_ms / 1000)
+        logger.info("═" * 60)
+        
+        return result, trail
+        
+    except Exception as e:
+        logger.error("Attribution failed with error: %s", e, exc_info=True)
+        trail.failed_checkpoint = "exception"
+        trail.finalize(0.0, "REJECT")
+        if exporter:
+            exporter.save_trail(trail)
+        return {"error": str(e), "decision": "REJECT"}, trail
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,12 @@ _INTENT_PATTERNS: List[Tuple[str, List[str]]] = [
     ("status", [
         r"what.?s\s+moving", r"anything\s+(happening|interesting|going\s+on)",
         r"status", r"update", r"what.?s\s+up", r"what.?s\s+new",
-        r"sitrep", r"brief\s*me",
+        r"sitrep", r"brief\s*me", r"any\s+spikes?", r"spikes?",
+        r"any\s+signals?", r"signals?", r"any\s+alerts?",
+        r"anything\s+new", r"any\s+moves?", r"what.?s\s+hot",
+        r"what.?s\s+happening", r"anything\s+to\s+watch",
+        r"give\s+me\s+an?\s+update", r"talk\s+to\s+me",
+        r"what\s+do\s+you\s+see", r"anything\s+I\s+should\s+know",
     ]),
     ("fed", [
         r"\bfed\b", r"\bfomc\b", r"\brates?\b", r"interest\s+rate",

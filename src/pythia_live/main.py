@@ -1,12 +1,13 @@
 """
 Pythia Live - Main Orchestrator
-Real-time prediction market intelligence engine
+Real-time prediction market intelligence engine with governance
 """
 import time
 import sys
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+from pathlib import Path
 import pandas as pd
 
 from .config import Config
@@ -19,6 +20,15 @@ from .correlations import find_correlated_markets
 from .news_context import get_news_context
 from .spike_archive import detect_spike, attribute_spike, save_spike, SpikeEvent
 from .patterns import build_patterns, find_matching_pattern, format_pattern_insight
+
+# Governance layer
+try:
+    from .governance import init_governance, GovernanceConfig, get_governance
+    from .causal_v2 import attribute_spike_with_governance
+    GOVERNANCE_ENABLED = True
+except ImportError:
+    GOVERNANCE_ENABLED = False
+    logger.warning("Governance module not available")
 
 # Import connectors
 try:
@@ -73,6 +83,23 @@ class PythiaLive:
         self.cycle_count = 0
         self._patterns = []  # Causal pattern cache
         self._patterns_last_built = None
+        
+        # Initialize governance layer
+        if GOVERNANCE_ENABLED:
+            audit_dir = Path(self.config.DB_PATH).parent / "audit_trails"
+            gov_config = GovernanceConfig(
+                max_cost_per_hour=10.0,
+                max_cost_per_run=2.0,
+                emergency_shutdown_threshold=50.0,
+                min_confidence_auto_relay=0.85,
+                min_confidence_flag_review=0.70,
+                audit_trail_enabled=True,
+                sandbox_mode=False  # Set True to prevent real signals
+            )
+            init_governance(gov_config, audit_dir)
+            logger.info("✓ Governance layer initialized (audit dir: %s)", audit_dir)
+        else:
+            logger.warning("⚠ Running WITHOUT governance layer - compliance features disabled")
 
     def run(self):
         """Main execution loop."""
@@ -266,7 +293,7 @@ class PythiaLive:
                         signal.metadata['pattern_insight'] = insight
                         signal.description += f" | {insight}"
 
-            # 5. Spike detection — archive significant price moves
+            # 5. Spike detection — archive significant price moves with governance
             spike = detect_spike(price_history, threshold=self.config.PROBABILITY_SPIKE_THRESHOLD)
             if spike:
                 spike.market_id = market_id
@@ -274,14 +301,53 @@ class PythiaLive:
                 spike.asset_class = classify_market(
                     market.get('title', ''), market.get('description', '')
                 )['asset_class']
-                try:
-                    spike = attribute_spike(spike)
-                except Exception as e:
-                    logger.warning("Spike attribution failed for %s: %s", market_id, e)
-                save_spike(self.db, spike)
-                logger.info("Spike archived: %s %s %.1f%% on %s",
-                            spike.direction, spike.market_title,
-                            spike.magnitude * 100, market_id)
+                
+                # Use governance-wrapped attribution if available
+                if GOVERNANCE_ENABLED:
+                    try:
+                        result, audit_trail = attribute_spike_with_governance(spike)
+                        
+                        # Check decision gate
+                        decision = result.get('decision', 'REJECT')
+                        confidence = result.get('final_confidence', 0.0)
+                        
+                        if decision == "AUTO_RELAY":
+                            # High confidence - relay signal automatically
+                            spike.attributed_events = [result['attribution']['most_likely_cause']]
+                            save_spike(self.db, spike)
+                            logger.info("✓ Spike AUTO-RELAYED: %s %.1f%% (confidence: %.2f)",
+                                       spike.market_title[:50], spike.magnitude * 100, confidence)
+                        
+                        elif decision == "FLAG_REVIEW":
+                            # Medium confidence - save but flag for human review
+                            spike.attributed_events = [result['attribution']['most_likely_cause']]
+                            spike.manual_tag = "PENDING_HUMAN_REVIEW"
+                            save_spike(self.db, spike)
+                            logger.warning("⚠ Spike FLAGGED FOR REVIEW: %s (confidence: %.2f)",
+                                          spike.market_title[:50], confidence)
+                        
+                        else:  # REJECT
+                            # Low confidence - archive but don't relay
+                            spike.manual_tag = "LOW_CONFIDENCE_REJECTED"
+                            save_spike(self.db, spike)
+                            logger.info("✗ Spike REJECTED: %s (confidence: %.2f)",
+                                       spike.market_title[:50], confidence)
+                    
+                    except Exception as e:
+                        logger.error("Governance attribution failed for %s: %s", market_id, e)
+                        # Fallback: save spike without attribution
+                        save_spike(self.db, spike)
+                
+                else:
+                    # No governance - use legacy attribution
+                    try:
+                        spike = attribute_spike(spike)
+                    except Exception as e:
+                        logger.warning("Spike attribution failed for %s: %s", market_id, e)
+                    save_spike(self.db, spike)
+                    logger.info("Spike archived: %s %s %.1f%% on %s",
+                               spike.direction, spike.market_title,
+                               spike.magnitude * 100, market_id)
 
             return signals
 

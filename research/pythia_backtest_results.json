@@ -1,0 +1,14 @@
+{
+  "run_date": "2026-02-20T20:56:51.844846",
+  "duration_seconds": 254.820828,
+  "config": {
+    "spike_threshold": 0.1,
+    "min_volume": 1000
+  },
+  "summary": {
+    "markets_analyzed": 593182,
+    "total_trades": 476674741,
+    "spikes_detected": 9154061
+  },
+  "statistics": {
+    "by_platform": {
