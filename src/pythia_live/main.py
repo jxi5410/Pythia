@@ -5,6 +5,7 @@ Real-time prediction market intelligence engine with governance
 import time
 import sys
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -33,9 +34,13 @@ except ImportError:
 # Import connectors
 try:
     from .connectors.polymarket import PolymarketConnector
+    from .connectors.polymarket_ws import PolymarketWebSocketConnector
+    from .market_stream import MarketStream
     HAS_POLYGON = True
+    HAS_WEBSOCKET = True
 except ImportError:
     HAS_POLYGON = False
+    HAS_WEBSOCKET = False
 
 try:
     from .connectors.kalshi import KalshiConnector
@@ -65,8 +70,15 @@ class PythiaLive:
     6. Repeat every POLL_INTERVAL seconds
     """
 
-    def __init__(self):
+    def __init__(self, mode="auto"):
+        """
+        Initialize Pythia Live.
+        
+        Args:
+            mode: "websocket", "http", or "auto" (WebSocket primary, HTTP fallback)
+        """
         self.config = Config()
+        self.mode = mode  # Store mode for runtime selection
         self.db = PythiaDB(self.config.DB_PATH)
         self.detector = SignalDetector(self.db, {
             'SIGNAL_COOLDOWN': self.config.SIGNAL_COOLDOWN,
@@ -86,6 +98,16 @@ class PythiaLive:
             self.connectors['manifold'] = ManifoldConnector()
         if HAS_POLYGON:
             self.connectors['polymarket'] = PolymarketConnector()
+        
+        # WebSocket stream (if available and requested)
+        self.market_stream = None
+        if HAS_WEBSOCKET and mode != "http":
+            self.market_stream = MarketStream(mode=mode)
+            logger.info(f"✓ WebSocket connector available (mode: {mode})")
+        
+        # Real-time update buffer for WebSocket mode
+        self.price_buffer = {}  # {market_id: latest_price_data}
+        self.last_buffer_flush = time.time()
         
         # Source health tracking
         self.source_health = {source: {"last_success": None, "consecutive_failures": 0} for source in self.connectors.keys()}
@@ -113,10 +135,147 @@ class PythiaLive:
             logger.warning("⚠ Running WITHOUT governance layer - compliance features disabled")
 
     def run(self):
-        """Main execution loop."""
+        """
+        Main execution loop - chooses WebSocket or HTTP based on mode.
+        """
         print("PYTHIA LIVE - Starting...")
+        print(f"Mode: {self.mode}")
         print(f"Connectors: {', '.join(self.connectors.keys())}")
-
+        
+        # Use WebSocket if available and not explicitly HTTP mode
+        if self.market_stream and self.mode != "http":
+            print("Using REAL-TIME WebSocket streaming (sub-second updates)")
+            asyncio.run(self._run_websocket())
+        else:
+            print("Using HTTP polling (60s interval)")
+            self._run_http_polling()
+    
+    async def _run_websocket(self):
+        """WebSocket streaming mode - real-time price updates."""
+        self.running = True
+        
+        # Initial market discovery
+        markets = self._discover_markets()
+        print(f"Found {len(markets)} liquid markets")
+        
+        # Send startup message
+        self.alerter.send_startup_message(len(markets))
+        
+        # Get market IDs for top 50 liquid markets
+        market_ids = [m['id'] for m in markets[:50]]
+        
+        print(f"\nStreaming {len(market_ids)} markets in real-time...")
+        print("Press Ctrl+C to stop\n")
+        
+        # Start pattern rebuild task
+        pattern_rebuild_task = asyncio.create_task(self._periodic_pattern_rebuild())
+        
+        try:
+            # Start WebSocket stream
+            await self.market_stream.start(
+                market_ids=market_ids,
+                on_price_update=self._handle_realtime_price,
+                on_trade=self._handle_realtime_trade,
+            )
+        except KeyboardInterrupt:
+            print("\n\nStopping Pythia Live...")
+            self.running = False
+            pattern_rebuild_task.cancel()
+            await self.market_stream.stop()
+    
+    async def _periodic_pattern_rebuild(self):
+        """Rebuild causal patterns every 10 minutes."""
+        while self.running:
+            await asyncio.sleep(600)  # 10 minutes
+            try:
+                self._patterns = build_patterns(self.db)
+                logger.info("Rebuilt %d causal patterns", len(self._patterns))
+            except Exception as e:
+                logger.warning("Pattern build failed: %s", e)
+    
+    def _handle_realtime_price(self, data: Dict):
+        """Handle real-time price update from WebSocket."""
+        market_id = data.get('market_id')
+        if not market_id:
+            return
+        
+        # Store in buffer
+        self.price_buffer[market_id] = data
+        
+        # Flush buffer every 5 seconds to detect spikes
+        if time.time() - self.last_buffer_flush > 5:
+            self._flush_price_buffer()
+            self.last_buffer_flush = time.time()
+    
+    def _handle_realtime_trade(self, data: Dict):
+        """Handle real-time trade from WebSocket."""
+        try:
+            # Save trade to database
+            trade_data = {
+                'market_id': data.get('market_id'),
+                'price': data.get('price'),
+                'size': data.get('size'),
+                'side': data.get('side'),
+                'timestamp': data.get('timestamp'),
+                'source': 'polymarket'
+            }
+            self.db.save_trades_batch([trade_data])
+        except Exception as e:
+            logger.error(f"Error saving trade: {e}")
+    
+    def _flush_price_buffer(self):
+        """Process buffered price updates and detect signals."""
+        if not self.price_buffer:
+            return
+        
+        updates_processed = 0
+        signals_found = []
+        
+        for market_id, price_data in self.price_buffer.items():
+            try:
+                # Get market info from database
+                market = self.db.get_market(market_id)
+                if not market:
+                    continue
+                
+                # Save price to database
+                yes_price = price_data.get('price', 0.5)
+                self.db.save_price(market_id, yes_price, 1 - yes_price, 0)
+                
+                # Get price history and detect signals
+                price_history = self.db.get_market_history(market_id, hours=24)
+                
+                if len(price_history) > 1:
+                    # Prepare market data for signal detection
+                    market_data = {
+                        **market,
+                        'yes_price': yes_price,
+                        'no_price': 1 - yes_price,
+                    }
+                    
+                    # Run signal detection
+                    signals = self.detector.detect_all(market_data, price_history)
+                    
+                    if signals:
+                        signals_found.extend(signals)
+                
+                updates_processed += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing price update for {market_id}: {e}")
+        
+        # Clear buffer
+        self.price_buffer.clear()
+        
+        # Handle detected signals
+        if signals_found:
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] {len(signals_found)} signals detected from {updates_processed} updates")
+            self._handle_signals(signals_found)
+        else:
+            logger.debug(f"Processed {updates_processed} price updates, no signals")
+    
+    def _run_http_polling(self):
+        """HTTP polling mode - legacy 60s interval (fallback)."""
         self.running = True
 
         # Initial market discovery
@@ -419,8 +578,24 @@ class PythiaLive:
 
 
 def main():
-    """Entry point."""
-    pythia = PythiaLive()
+    """
+    Entry point.
+    
+    Usage:
+        python -m src.pythia_live.main              # Auto mode (WebSocket primary, HTTP fallback)
+        python -m src.pythia_live.main --websocket  # WebSocket only
+        python -m src.pythia_live.main --http       # HTTP polling only
+    """
+    import sys
+    
+    # Parse mode from command line
+    mode = "auto"  # Default: WebSocket primary, HTTP fallback
+    if "--websocket" in sys.argv:
+        mode = "websocket"
+    elif "--http" in sys.argv:
+        mode = "http"
+    
+    pythia = PythiaLive(mode=mode)
     pythia.run()
 
 

@@ -224,6 +224,22 @@ class PythiaDB:
                 datetime.now()
             ))
             conn.commit()
+    
+    def get_market(self, market_id: str) -> Optional[Dict]:
+        """Get market by ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT id, source, title, category, liquidity, volume_24h, 
+                       created_at, last_updated
+                FROM markets
+                WHERE id = ?
+            """, (market_id,))
+            row = cursor.fetchone()
+            
+            if row:
+                return dict(row)
+            return None
 
     # ------------------------------------------------------------------
     # Prices (unchanged interface)
