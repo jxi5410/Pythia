@@ -36,11 +36,14 @@ try:
     from .connectors.polymarket import PolymarketConnector
     from .connectors.polymarket_ws import PolymarketWebSocketConnector
     from .market_stream import MarketStream
+    from .orderbook_analyzer import OrderbookAnalyzer, LiquiditySignal
     HAS_POLYGON = True
     HAS_WEBSOCKET = True
+    HAS_ORDERBOOK = True
 except ImportError:
     HAS_POLYGON = False
     HAS_WEBSOCKET = False
+    HAS_ORDERBOOK = False
 
 try:
     from .connectors.kalshi import KalshiConnector
@@ -104,6 +107,12 @@ class PythiaLive:
         if HAS_WEBSOCKET and mode != "http":
             self.market_stream = MarketStream(mode=mode)
             logger.info(f"✓ WebSocket connector available (mode: {mode})")
+        
+        # Phase 3: Orderbook Analyzer (critical for institutional signals)
+        self.orderbook_analyzer = None
+        if HAS_ORDERBOOK:
+            self.orderbook_analyzer = OrderbookAnalyzer()
+            logger.info("✓ Orderbook analyzer initialized (Phase 3)")
         
         # Real-time update buffer for WebSocket mode
         self.price_buffer = {}  # {market_id: latest_price_data}
@@ -220,8 +229,46 @@ class PythiaLive:
                 'source': 'polymarket'
             }
             self.db.save_trades_batch([trade_data])
+            
+            # Phase 3: Process trade for iceberg detection
+            if self.orderbook_analyzer:
+                signal = self.orderbook_analyzer.process_trade(
+                    data.get('market_id'),
+                    data.get('price'),
+                    data.get('size'),
+                    data.get('side')
+                )
+                if signal:
+                    self._handle_liquidity_signal(signal)
+                    
         except Exception as e:
             logger.error(f"Error saving trade: {e}")
+    
+    def _handle_orderbook_update(self, data: Dict):
+        """Handle real-time orderbook update from WebSocket (Phase 3)."""
+        if not self.orderbook_analyzer:
+            return
+        
+        try:
+            market_id = data.get('market_id')
+            bids = data.get('bids', [])  # List of [price, size]
+            asks = data.get('asks', [])  # List of [price, size]
+            sequence = data.get('sequence', 0)
+            
+            # Process orderbook and detect liquidity signals
+            signals = self.orderbook_analyzer.process_orderbook(
+                market_id=market_id,
+                bids=bids,
+                asks=asks,
+                sequence=sequence
+            )
+            
+            # Handle any detected signals
+            for signal in signals:
+                self._handle_liquidity_signal(signal)
+                
+        except Exception as e:
+            logger.error(f"Error processing orderbook: {e}")
     
     def _flush_price_buffer(self):
         """Process buffered price updates and detect signals."""
