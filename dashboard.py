@@ -164,8 +164,8 @@ with st.sidebar:
         st.rerun()
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📡 Intelligence Feed", "🗺️ Market Map", "🚨 Signals", "🔬 Analysis", "🔍 Spike Explorer"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📡 Intelligence Feed", "🗺️ Market Map", "🚨 Signals", "🔬 Analysis", "🔍 Spike Explorer", "⚡ Live Events"
 ])
 
 # ─────────────────────────────────────────────
@@ -788,6 +788,91 @@ with tab5:
             st.info("No spike events recorded yet. Start Pythia Live to begin detecting spikes.")
     else:
         st.warning("Database not available")
+
+# ─────────────────────────────────────────────
+# Tab 6: Live Events
+# ─────────────────────────────────────────────
+with tab6:
+    st.subheader("Live Market Events")
+    st.caption("Real-time view of market events and spikes. Adjust thresholds to filter noise.")
+
+    # Customizable spike threshold
+    col_t1, col_t2, col_t3 = st.columns(3)
+    with col_t1:
+        spike_threshold = st.slider("Spike Threshold (%)", 1.0, 20.0, 5.0, 0.5, key="live_spike_threshold",
+                                    help="Minimum percentage change to consider an event a spike.")
+    with col_t2:
+        refresh_rate = st.selectbox("Refresh Rate", ["Every 5s", "Every 10s", "Every 30s", "Every 60s"], index=1,
+                                    help="How often to refresh the live data.")
+    with col_t3:
+        if st.button("🔄 Force Refresh", use_container_width=True):
+            st.cache_resource.clear()
+            st.rerun()
+
+    # Placeholder for live data - in production, this would connect to a live feed
+    st.markdown("#### Recent Events (Last 1 Hour)")
+    conn = get_db()
+    if conn:
+        try:
+            # Fetch recent price changes above threshold
+            recent_events = pd.read_sql_query("""
+                SELECT p.market_id, m.title, m.asset_class, p.yes_price, p.timestamp
+                FROM prices p
+                JOIN markets m ON p.market_id = m.id
+                WHERE p.timestamp > datetime('now', '-1 hour')
+                ORDER BY p.timestamp DESC
+                LIMIT 100
+            """, conn)
+
+            if not recent_events.empty:
+                # Calculate price changes
+                recent_events = recent_events.sort_values(['market_id', 'timestamp'])
+                recent_events['prev_price'] = recent_events.groupby('market_id')['yes_price'].shift(1)
+                recent_events['change'] = (recent_events['yes_price'] - recent_events['prev_price']).abs()
+                recent_events['change_pct'] = recent_events['change'] / recent_events['prev_price'] * 100
+                recent_events = recent_events.dropna(subset=['change'])
+                
+                # Filter by threshold
+                spikes = recent_events[recent_events['change_pct'] >= spike_threshold]
+                
+                if not spikes.empty:
+                    for _, event in spikes.head(10).iterrows():
+                        cls = classify_title(event['title'])
+                        asset_class = cls['asset_class']
+                        badge_class = f"asset-{asset_class}" if asset_class != "general" else ""
+                        direction = 'up' if event['change'] > 0 else 'down'
+                        color = '#2ed573' if direction == 'up' else '#ff4757'
+                        ts = pd.to_datetime(event['timestamp']).strftime('%H:%M:%S')
+                        
+                        st.markdown(f"""
+                        <div class="signal-card signal-medium">
+                            <span class="asset-badge {badge_class}">{asset_class}</span>
+                            <b>⚡ Spike {direction}</b> · {ts}
+                            <br><b>{event['title'][:80]}</b>
+                            <br><span style="color:{color}">Change: {event['change_pct']:.1f}%</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info(f"No spikes detected above {spike_threshold}% threshold in the last hour.")
+            else:
+                st.info("No recent events data available.")
+        except Exception as e:
+            st.error(f"Error fetching live events: {e}")
+    else:
+        st.warning("Database not available. Is Pythia Live running?")
+
+    st.divider()
+    st.markdown("#### Live Data Status")
+    st.caption("Status of the live data feed. When Pythia is running, this updates continuously.")
+    if DB_PATH.exists():
+        mod_time = datetime.fromtimestamp(DB_PATH.stat().st_mtime)
+        age_sec = (datetime.now() - mod_time).total_seconds()
+        status = "🟢 Live" if age_sec < 120 else "🟡 Stale"
+        st.markdown(f"- **Database Status:** {status}")
+        st.markdown(f"- **Last Update:** {mod_time.strftime('%H:%M:%S')} ({int(age_sec)}s ago)")
+    else:
+        st.markdown("- **Database Status:** 🔴 Offline")
+        st.markdown("- **Last Update:** Not available")
 
 # Footer
 st.divider()
