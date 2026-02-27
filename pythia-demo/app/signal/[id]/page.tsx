@@ -48,20 +48,23 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchSignalDetail();
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/signals/${id}`);
+        const data = await response.json();
+        if (!cancelled) {
+          setSignal(data);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error fetching signal:', error);
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
   }, [id]);
-
-  const fetchSignalDetail = async () => {
-    try {
-      const response = await fetch(`/api/signals/${id}`);
-      const data = await response.json();
-      setSignal(data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching signal:', error);
-      setLoading(false);
-    }
-  };
 
   const handleShare = async () => {
     if (navigator.share && signal) {
@@ -247,7 +250,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
             </span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(signal.layersWithLinks || signal.layersFired.map((text, i) => ({ text, url: '' }))).map((layer, idx) => (
+            {(signal.layersWithLinks || signal.layersFired.map((text) => ({ text, url: '' }))).map((layer, idx) => (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{
                   width: 7,

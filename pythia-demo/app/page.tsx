@@ -12,24 +12,26 @@ export default function Home() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   useEffect(() => {
-    fetchSignals();
-    const interval = setInterval(fetchSignals, 30000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const filterParam = filter !== 'all' ? `?category=${filter}` : '';
+        const response = await fetch(`/api/signals${filterParam}`);
+        const data = await response.json();
+        if (!cancelled) {
+          setSignals(data.signals || []);
+          setLastUpdate(new Date());
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error fetching signals:', error);
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [filter]);
-
-  const fetchSignals = async () => {
-    try {
-      const filterParam = filter !== 'all' ? `?category=${filter}` : '';
-      const response = await fetch(`/api/signals${filterParam}`);
-      const data = await response.json();
-      setSignals(data.signals || []);
-      setLastUpdate(new Date());
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching signals:', error);
-      setLoading(false);
-    }
-  };
 
   const categories = [
     { id: 'all', label: 'All Signals' },
