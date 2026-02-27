@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { SignalDetail } from '@/types';
+
 // Extended mock data with full signal details
-const mockSignalDetails: Record<string, any> = {
+const mockSignalDetails: Record<string, SignalDetail> = {
   '1': {
     id: '1',
     timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),

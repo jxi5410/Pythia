@@ -1,6 +1,6 @@
 """
 Pythia Live Web Dashboard
-Bloomberg-style trading intelligence interface
+Modern trading intelligence interface
 """
 
 import json
@@ -20,36 +20,37 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Minimal dark styling
+# Modern dark styling
 st.markdown("""
 <style>
-    .main { background-color: #0e1117; }
+    .main { background-color: #09090b; }
     .signal-card {
-        background: #1a2332; border-left: 4px solid #2a3441;
-        padding: 14px 16px; margin: 8px 0; border-radius: 0 6px 6px 0;
-        font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.88em;
+        background: #131316; border-left: 3px solid rgba(255, 255, 255, 0.06);
+        padding: 16px 18px; margin: 10px 0; border-radius: 12px;
+        font-size: 0.88em; border: 1px solid rgba(255, 255, 255, 0.05);
     }
-    .signal-critical { border-left-color: #ff4757; }
-    .signal-high { border-left-color: #ffa502; }
-    .signal-medium { border-left-color: #eccc68; }
-    .signal-low { border-left-color: #2ed573; }
+    .signal-critical { border-left-color: #f43f5e; box-shadow: inset 3px 0 12px -4px rgba(244, 63, 94, 0.15); }
+    .signal-high { border-left-color: #f97316; box-shadow: inset 3px 0 12px -4px rgba(249, 115, 22, 0.15); }
+    .signal-medium { border-left-color: #eab308; box-shadow: inset 3px 0 12px -4px rgba(234, 179, 8, 0.12); }
+    .signal-low { border-left-color: #10b981; box-shadow: inset 3px 0 12px -4px rgba(16, 185, 129, 0.12); }
     .asset-badge {
-        display: inline-block; padding: 2px 8px; border-radius: 4px;
-        font-size: 0.75em; font-weight: 600; text-transform: uppercase;
-        background: #2a3441; color: #8b9dc3; margin-right: 6px;
+        display: inline-block; padding: 3px 10px; border-radius: 100px;
+        font-size: 0.72em; font-weight: 600; text-transform: uppercase;
+        background: rgba(255, 255, 255, 0.04); color: #a1a1aa; margin-right: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.06); letter-spacing: 0.04em;
     }
-    .asset-rates { background: #1e3a5f; color: #4db8ff; }
-    .asset-fx { background: #3a1e5f; color: #b84dff; }
-    .asset-equities { background: #1e5f3a; color: #4dffb8; }
-    .asset-commodities { background: #5f3a1e; color: #ffb84d; }
-    .asset-crypto { background: #5f1e5f; color: #ff4dff; }
-    .asset-geopolitical { background: #5f1e1e; color: #ff4d4d; }
-    .heatmap-up { color: #2ed573; }
-    .heatmap-down { color: #ff4757; }
-    .status-dot { display: inline-block; width: 8px; height: 8px;
-                  border-radius: 50%; margin-right: 4px; }
-    .status-live { background: #2ed573; }
-    .status-offline { background: #ff4757; }
+    .asset-rates { background: rgba(59, 130, 246, 0.08); color: #60a5fa; border-color: rgba(59, 130, 246, 0.15); }
+    .asset-fx { background: rgba(168, 85, 247, 0.08); color: #c084fc; border-color: rgba(168, 85, 247, 0.15); }
+    .asset-equities { background: rgba(16, 185, 129, 0.08); color: #34d399; border-color: rgba(16, 185, 129, 0.15); }
+    .asset-commodities { background: rgba(245, 158, 11, 0.08); color: #fbbf24; border-color: rgba(245, 158, 11, 0.15); }
+    .asset-crypto { background: rgba(236, 72, 153, 0.08); color: #f472b6; border-color: rgba(236, 72, 153, 0.15); }
+    .asset-geopolitical { background: rgba(244, 63, 94, 0.08); color: #fb7185; border-color: rgba(244, 63, 94, 0.15); }
+    .heatmap-up { color: #10b981; }
+    .heatmap-down { color: #f43f5e; }
+    .status-dot { display: inline-block; width: 7px; height: 7px;
+                  border-radius: 50%; margin-right: 5px; }
+    .status-live { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+    .status-offline { background: #f43f5e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -231,7 +232,7 @@ with tab1:
                 <span class="asset-badge {badge_class}">{asset_class}</span>
                 <b>{emoji} {sig['signal_type']}</b> · {ts}
                 <br><b>{title[:80]}</b>{price_line}
-                <br><span style="color:#8b9dc3">Edge: {sig['expected_return']:.2%} · {cls['instruments'][:60]}</span>
+                <br><span style="color:#a1a1aa">Edge: {sig['expected_return']:.2%} · {cls['instruments'][:60]}</span>
             </div>
             """, unsafe_allow_html=True)
     else:
@@ -288,13 +289,13 @@ with tab2:
                 y='short_title',
                 orientation='h',
                 color='price_change_24h',
-                color_continuous_scale=['#ff4757', '#2a3441', '#2ed573'],
+                color_continuous_scale=['#f43f5e', '#1c1c22', '#10b981'],
                 color_continuous_midpoint=0,
             )
             fig.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#8b9dc3',
+                font_color='#a1a1aa',
                 yaxis_title='',
                 xaxis_title='24h Change',
                 height=max(400, len(heatmap_df) * 22),
@@ -408,13 +409,13 @@ with tab4:
                 signal_perf, x='Signal Type', y='Win Rate',
                 text='Sample Size',
                 color='Win Rate',
-                color_continuous_scale=['#ff4757', '#eccc68', '#2ed573'],
+                color_continuous_scale=['#f43f5e', '#eab308', '#10b981'],
                 range_color=[0.4, 0.8]
             )
             fig.update_traces(texttemplate='n=%{text}', textposition='outside')
             fig.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#8b9dc3', showlegend=False, height=350,
+                font_color='#a1a1aa', showlegend=False, height=350,
                 yaxis=dict(tickformat='.0%', range=[0, 0.9])
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -436,7 +437,7 @@ with tab4:
                 name='Predicted',
                 x=calibration['Confidence Level'],
                 y=calibration['Predicted Win Rate'],
-                marker_color='#4db8ff',
+                marker_color='#818cf8',
                 text=calibration['Predicted Win Rate'],
                 texttemplate='%{text:.0%}',
                 textposition='outside'
@@ -445,14 +446,14 @@ with tab4:
                 name='Actual',
                 x=calibration['Confidence Level'],
                 y=calibration['Actual Win Rate'],
-                marker_color='#2ed573',
+                marker_color='#10b981',
                 text=calibration['Sample Size'],
                 texttemplate='n=%{text}',
                 textposition='outside'
             ))
             fig.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#8b9dc3', barmode='group', height=350,
+                font_color='#a1a1aa', barmode='group', height=350,
                 yaxis=dict(tickformat='.0%', range=[0, 0.9])
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -476,15 +477,15 @@ with tab4:
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=perf_df['Date'], y=perf_df['Cumulative Return'],
-            fill='tozeroy', line=dict(color='#2ed573', width=2),
+            fill='tozeroy', line=dict(color='#10b981', width=2),
             name='Pythia',
             hovertemplate='%{y:.2%}<extra></extra>'
         ))
-        fig.add_hline(y=0, line_dash="dash", line_color="#8b9dc3", opacity=0.3)
+        fig.add_hline(y=0, line_dash="dash", line_color="#52525b", opacity=0.3)
         fig.update_layout(
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            font_color='#8b9dc3', 
-            xaxis_gridcolor='#2a3441', yaxis_gridcolor='#2a3441',
+            font_color='#a1a1aa', 
+            xaxis_gridcolor='rgba(255,255,255,0.04)', yaxis_gridcolor='rgba(255,255,255,0.04)',
             yaxis=dict(tickformat='.1%'),
             height=350
         )
@@ -644,15 +645,15 @@ with tab5:
                     'asset_class': 'Asset Class',
                 },
                 color_discrete_map={
-                    'rates': '#4db8ff', 'fx': '#b84dff', 'equities': '#4dffb8',
-                    'commodities': '#ffb84d', 'crypto': '#ff4dff',
-                    'geopolitical': '#ff4d4d', 'general': '#8b9dc3',
+                    'rates': '#60a5fa', 'fx': '#c084fc', 'equities': '#34d399',
+                    'commodities': '#fbbf24', 'crypto': '#f472b6',
+                    'geopolitical': '#fb7185', 'general': '#a1a1aa',
                 },
             )
             fig.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#8b9dc3',
+                font_color='#a1a1aa',
                 xaxis_gridcolor='#2a3441',
                 yaxis_gridcolor='#2a3441',
                 height=400,
@@ -765,17 +766,17 @@ with tab5:
 
                 if patterns:
                     for p in patterns[:10]:
-                        conf_color = '#2ed573' if p.confidence >= 0.7 else '#eccc68' if p.confidence >= 0.5 else '#ff6348'
+                        conf_color = '#10b981' if p.confidence >= 0.7 else '#eab308' if p.confidence >= 0.5 else '#f43f5e'
                         reaction_str = ''
                         if p.avg_asset_reaction:
                             sign = '+' if p.avg_asset_reaction > 0 else ''
                             reaction_str = f" | Avg reaction: {sign}{p.avg_asset_reaction:.1%}"
 
                         st.markdown(f"""
-                        <div class="signal-card" style="border-left-color: {conf_color};">
+                        <div class="signal-card" style="border-left-color: {conf_color}; border-radius: 12px;">
                             <b>{p.market_category.upper()}</b> · {p.asset_class} · {p.direction}
                             <br>Avg magnitude: {p.avg_magnitude:.1%} · Samples: {p.sample_size}{reaction_str}
-                            <br><span style="color:#8b9dc3">Typical cause: {p.typical_cause or 'untagged'}
+                            <br><span style="color:#a1a1aa">Typical cause: {p.typical_cause or 'untagged'}
                             · Confidence: {p.confidence:.0%}</span>
                         </div>
                         """, unsafe_allow_html=True)
@@ -841,7 +842,7 @@ with tab6:
                         asset_class = cls['asset_class']
                         badge_class = f"asset-{asset_class}" if asset_class != "general" else ""
                         direction = 'up' if event['change'] > 0 else 'down'
-                        color = '#2ed573' if direction == 'up' else '#ff4757'
+                        color = '#10b981' if direction == 'up' else '#f43f5e'
                         ts = pd.to_datetime(event['timestamp']).strftime('%H:%M:%S')
                         
                         st.markdown(f"""
