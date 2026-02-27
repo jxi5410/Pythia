@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   title: 'Pythia | Prediction Market Intelligence',
   description: 'Institutional-grade prediction market intelligence. Multi-layer confluence signals for event-driven PMs and quant researchers.',
   viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
-  themeColor: '#0a0e1a',
+  themeColor: '#09090b',
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.ico',

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Pythia Terminal v2 — Bloomberg-style prediction market intelligence dashboard.
+Pythia Terminal v2 — Modern prediction market intelligence dashboard.
 
 Phase 1 UX overhaul:
   - Sidebar: watchlists, alert config, system status
   - Tab 1: "What is Moving Now" homepage (confluence events, watchlist feed, divergences)
   - Tab 2-5: Inquiry, Patterns, Correlations, News Impact (carried forward)
   - Tab 6: Track Record (new)
-  - Dark theme, dense layout, monospace numbers
+  - Dark theme, clean modern layout
 """
 
 import json
@@ -46,83 +46,86 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Base */
-    .stApp { background-color: #0e1117; color: #c0c0c0; }
+    /* Base — modern dark */
+    .stApp { background-color: #09090b; color: #d4d4d8; }
 
-    /* Typography */
-    h1, h2, h3, h4 { color: #00ff41 !important; font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace !important; }
-    .stMarkdown { color: #c0c0c0; }
-    code { color: #00ff41; background-color: #1a1a2e; }
+    /* Typography — clean sans-serif headers with mono accents */
+    h1, h2, h3, h4 { color: #f4f4f5 !important; font-family: 'Inter', -apple-system, system-ui, sans-serif !important; letter-spacing: -0.02em; }
+    .stMarkdown { color: #d4d4d8; }
+    code { color: #818cf8; background-color: rgba(99, 91, 255, 0.1); border-radius: 4px; padding: 2px 6px; }
 
     /* Metrics */
     [data-testid="stMetric"] {
-        background-color: #111827;
-        border: 1px solid #1f2937;
-        border-radius: 4px;
-        padding: 12px 16px;
+        background-color: #131316;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        padding: 16px 18px;
     }
     [data-testid="stMetricValue"] {
-        color: #00ff41 !important;
-        font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace !important;
+        color: #f4f4f5 !important;
+        font-family: 'JetBrains Mono', 'SF Mono', monospace !important;
         font-size: 1.4rem !important;
+        letter-spacing: -0.02em;
     }
-    [data-testid="stMetricLabel"] { color: #888 !important; font-size: 0.75rem !important; text-transform: uppercase; }
-    [data-testid="stMetricDelta"] > div { font-family: 'Courier New', monospace; }
+    [data-testid="stMetricLabel"] { color: #71717a !important; font-size: 0.7rem !important; text-transform: uppercase; letter-spacing: 0.06em; }
+    [data-testid="stMetricDelta"] > div { font-family: 'JetBrains Mono', monospace; }
 
     /* Positive / negative deltas */
-    [data-testid="stMetricDelta"] svg[data-testid="stMetricDeltaIcon-Up"] + div { color: #00ff41 !important; }
-    [data-testid="stMetricDelta"] svg[data-testid="stMetricDeltaIcon-Down"] + div { color: #ff073a !important; }
+    [data-testid="stMetricDelta"] svg[data-testid="stMetricDeltaIcon-Up"] + div { color: #10b981 !important; }
+    [data-testid="stMetricDelta"] svg[data-testid="stMetricDeltaIcon-Down"] + div { color: #f43f5e !important; }
 
     /* Sidebar */
-    [data-testid="stSidebar"] { background-color: #0a0e14; border-right: 1px solid #1f2937; }
-    [data-testid="stSidebar"] .stMarkdown { color: #9ca3af; }
+    [data-testid="stSidebar"] { background-color: #0d0d10; border-right: 1px solid rgba(255, 255, 255, 0.05); }
+    [data-testid="stSidebar"] .stMarkdown { color: #a1a1aa; }
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-        color: #00ff41 !important;
+        color: #f4f4f5 !important;
     }
 
     /* Tables / DataFrames */
-    .stDataFrame { font-family: 'SF Mono', 'Courier New', monospace !important; font-size: 0.8rem; }
-    .stDataFrame td, .stDataFrame th { border-color: #1f2937 !important; }
+    .stDataFrame { font-family: 'JetBrains Mono', 'SF Mono', monospace !important; font-size: 0.8rem; }
+    .stDataFrame td, .stDataFrame th { border-color: rgba(255, 255, 255, 0.06) !important; }
 
     /* Inputs */
     input, textarea, select, [data-baseweb="select"] {
-        background-color: #111827 !important;
-        color: #e5e7eb !important;
-        border-color: #374151 !important;
+        background-color: #131316 !important;
+        color: #e4e4e7 !important;
+        border-color: rgba(255, 255, 255, 0.08) !important;
+        border-radius: 8px !important;
     }
 
     /* Buttons */
     .stButton > button {
-        background-color: #0d2818;
-        color: #00ff41;
-        border: 1px solid #00ff41;
-        font-family: 'Courier New', monospace;
-        font-weight: bold;
+        background-color: rgba(99, 91, 255, 0.1);
+        color: #818cf8;
+        border: 1px solid rgba(99, 91, 255, 0.2);
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s ease;
     }
-    .stButton > button:hover { background-color: #00ff41; color: #0e1117; }
+    .stButton > button:hover { background-color: #635bff; color: #fff; border-color: #635bff; }
 
     /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #1f2937; }
-    .stTabs [data-baseweb="tab"] { color: #9ca3af; font-family: 'Courier New', monospace; font-size: 0.85rem; }
-    .stTabs [aria-selected="true"] { color: #00ff41 !important; border-bottom-color: #00ff41 !important; }
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+    .stTabs [data-baseweb="tab"] { color: #71717a; font-size: 0.85rem; font-weight: 500; }
+    .stTabs [aria-selected="true"] { color: #f4f4f5 !important; border-bottom-color: #635bff !important; }
 
     /* Expanders */
-    .streamlit-expanderHeader { color: #d1d5db !important; font-family: 'Courier New', monospace; }
-    .streamlit-expanderContent { background-color: #111827; border: 1px solid #1f2937; border-top: none; }
+    .streamlit-expanderHeader { color: #d4d4d8 !important; }
+    .streamlit-expanderContent { background-color: #111114; border: 1px solid rgba(255, 255, 255, 0.05); border-top: none; border-radius: 0 0 10px 10px; }
 
     /* Dividers */
-    hr { border-color: #1f2937; }
+    hr { border-color: rgba(255, 255, 255, 0.06); }
 
     /* Custom classes */
-    .pythia-header { font-family: 'SF Mono', 'Courier New', monospace; color: #00ff41; font-size: 13px; border-bottom: 1px solid #1f2937; padding-bottom: 6px; margin-bottom: 12px; letter-spacing: 1px; }
-    .card-red { background-color: #1a0a0a; border: 1px solid #ff073a; border-radius: 4px; padding: 12px 16px; margin-bottom: 8px; }
-    .card-amber { background-color: #1a1400; border: 1px solid #ffa500; border-radius: 4px; padding: 12px 16px; margin-bottom: 8px; }
-    .card-green { background-color: #0a1a0a; border: 1px solid #00ff41; border-radius: 4px; padding: 12px 16px; margin-bottom: 8px; }
-    .tag-red { color: #ff073a; font-weight: bold; }
-    .tag-amber { color: #ffa500; font-weight: bold; }
-    .tag-green { color: #00ff41; font-weight: bold; }
-    .mono { font-family: 'SF Mono', 'Courier New', monospace; }
-    .dimmed { color: #666; }
+    .pythia-header { color: #71717a; font-size: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 8px; margin-bottom: 14px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .card-red { background-color: rgba(244, 63, 94, 0.06); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
+    .card-amber { background-color: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
+    .card-green { background-color: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 12px; padding: 14px 18px; margin-bottom: 10px; }
+    .tag-red { color: #f43f5e; font-weight: 600; }
+    .tag-amber { color: #f59e0b; font-weight: 600; }
+    .tag-green { color: #10b981; font-weight: 600; }
+    .mono { font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+    .dimmed { color: #52525b; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -171,8 +174,8 @@ wm = get_watchlist_manager()
 # ================================================================== #
 
 with st.sidebar:
-    st.markdown("### P Y T H I A")
-    st.markdown('<div class="pythia-header">PREDICTION MARKET INTELLIGENCE</div>', unsafe_allow_html=True)
+    st.markdown("### Pythia")
+    st.markdown('<div class="pythia-header">Prediction Market Intelligence</div>', unsafe_allow_html=True)
 
     # --- Watchlist selector ---
     st.markdown("#### WATCHLISTS")
@@ -250,7 +253,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        '<span class="dimmed" style="font-size:0.7rem;">PYTHIA v1.0 · PHASE 1 UX</span>',
+        '<span class="dimmed" style="font-size:0.7rem;">Pythia v1.0</span>',
         unsafe_allow_html=True,
     )
 
@@ -281,9 +284,9 @@ def filter_by_watchlist(spikes, watchlist_name):
 
 hdr1, hdr2, hdr3 = st.columns([4, 1, 1])
 with hdr1:
-    st.markdown("# PYTHIA TERMINAL")
+    st.markdown("# Pythia Terminal")
     st.markdown(
-        '<div class="pythia-header">CROSS-LAYER SIGNAL CONVERGENCE \u00b7 INSTITUTIONAL GRADE</div>',
+        '<div class="pythia-header">Cross-Layer Signal Convergence · Institutional Grade</div>',
         unsafe_allow_html=True,
     )
 with hdr2:
@@ -794,8 +797,7 @@ with tab6:
 st.markdown("---")
 st.markdown(
     '<div class="pythia-header">'
-    "PYTHIA v1.0 \u00b7 DATA: POLYMARKET + KALSHI + 6 CROSS-ASSET LAYERS \u00b7 "
-    "CONFLUENCE ENGINE \u00b7 BUILT FOR INSTITUTIONAL TRADERS"
+    "Pythia v1.0 · Polymarket + Kalshi + 6 Cross-Asset Layers · Confluence Engine"
     "</div>",
     unsafe_allow_html=True,
 )

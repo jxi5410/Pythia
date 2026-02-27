@@ -17,7 +17,7 @@ function Tooltip({ label, help }: { label: string; help?: string }) {
 const explanations: Record<string, string> = {
   'Confluence': 'Number of independent data layers that fired simultaneously for this event',
   'Hit Rate': 'Percentage of similar historical setups that moved in the predicted direction',
-  'Edge Window': 'Median time before the market fully prices in this type of event',
+  'Edge Window': 'Median time before the market fully prices this in',
   'Confidence': 'Model-generated score combining layer quality, recency, and historical accuracy',
   'Correlation': 'How closely this asset tracks the prediction market signal (1.0 = perfect)',
 };
@@ -36,10 +36,10 @@ const assetHelp: Record<string, string> = {
 };
 
 const severityExplanations: Record<string, string> = {
-  'critical': '4+ layers converged • Highest confidence • Immediate attention',
-  'high': '3 layers converged • Strong signal • Act within hours',
-  'medium': '2 layers converged • Moderate confidence • Monitor closely',
-  'low': '1 layer • Early indicator • Watch for confirmation',
+  'critical': '4+ layers converged · Highest confidence · Immediate attention',
+  'high': '3 layers converged · Strong signal · Act within hours',
+  'medium': '2 layers converged · Moderate confidence · Monitor closely',
+  'low': '1 layer · Early indicator · Watch for confirmation',
 };
 
 export default function SignalDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -81,7 +81,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{
-          width: 24, height: 24,
+          width: 28, height: 28,
           border: '2px solid var(--accent)',
           borderTopColor: 'transparent',
           borderRadius: '50%',
@@ -97,22 +97,13 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
       <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-md)' }}>Signal not found</p>
-          <Link href="/" style={{ color: 'var(--accent-text)', fontSize: 'var(--text-sm)', marginTop: 8, display: 'inline-block' }}>
-            ← Back to feed
+          <Link href="/" style={{ color: 'var(--accent-text)', fontSize: 'var(--text-sm)', marginTop: 12, display: 'inline-block' }}>
+            Back to feed
           </Link>
         </div>
       </div>
     );
   }
-
-  const sevColors: Record<string, string> = {
-    critical: 'var(--severity-critical)',
-    high: 'var(--severity-high)',
-    medium: 'var(--severity-medium)',
-    low: 'var(--severity-low)',
-  };
-
-  const sevColor = sevColors[signal.severity];
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
@@ -121,14 +112,14 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        background: 'rgba(10, 14, 26, 0.95)',
-        backdropFilter: 'blur(12px)',
+        background: 'rgba(9, 9, 11, 0.92)',
+        backdropFilter: 'blur(16px)',
         borderBottom: '1px solid var(--border-subtle)',
       }}>
         <div style={{
-          maxWidth: 640,
+          maxWidth: 680,
           margin: '0 auto',
-          padding: '12px 16px',
+          padding: '14px 20px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -141,6 +132,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
             textDecoration: 'none',
             fontSize: 'var(--text-sm)',
             fontWeight: 500,
+            transition: 'color 0.15s ease',
           }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 19l-7-7 7-7" />
@@ -153,17 +145,18 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              padding: '6px 14px',
+              padding: '7px 16px',
               background: 'var(--accent-muted)',
-              border: '1px solid var(--accent-text)',
-              borderRadius: 6,
+              border: '1px solid rgba(99, 91, 255, 0.15)',
+              borderRadius: 100,
               color: 'var(--accent-text)',
               fontSize: 'var(--text-sm)',
               fontWeight: 600,
               cursor: 'pointer',
+              transition: 'all 0.2s ease',
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
             Share
@@ -171,32 +164,26 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         </div>
       </header>
 
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '20px 16px 80px' }}>
+      <div style={{ maxWidth: 680, margin: '0 auto', padding: '24px 20px 80px' }}>
         {/* Title section */}
-        <div style={{ marginBottom: 24 }}>
-          <span className="tooltip-wrap" style={{
-            display: 'inline-block',
-            fontSize: 'var(--text-xs)',
-            fontWeight: 700,
-            color: sevColor,
-            padding: '3px 10px',
-            border: `1px solid ${sevColor}`,
-            borderRadius: 4,
-            letterSpacing: '0.05em',
-            textTransform: 'uppercase',
-            marginBottom: 12,
+        <div style={{ marginBottom: 28 }}>
+          <span className={`severity-badge severity-badge-${signal.severity}`} style={{
+            marginBottom: 14,
+            display: 'inline-flex',
             cursor: 'help',
           }}>
-            {signal.severity} SIGNAL
-            <span className="tooltip-text">{severityExplanations[signal.severity]}</span>
+            <span className="tooltip-wrap">
+              {signal.severity.toUpperCase()} SIGNAL
+              <span className="tooltip-text">{severityExplanations[signal.severity]}</span>
+            </span>
           </span>
           <h1 style={{
             fontSize: 'var(--text-2xl)',
             fontWeight: 700,
             color: 'var(--text-primary)',
-            lineHeight: 1.3,
+            lineHeight: 1.35,
             letterSpacing: '-0.02em',
-            marginBottom: 8,
+            marginBottom: 10,
           }}>
             {signal.event}
           </h1>
@@ -210,10 +197,10 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         </div>
 
         {/* Key Metrics */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <div className="section-card">
             <Tooltip label="Confluence" help={explanations['Confluence']} />
-            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 6 }}>
+            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 8 }}>
               {signal.confluenceLayers}<span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>/{signal.totalLayers}</span>
             </div>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -222,7 +209,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
           </div>
           <div className="section-card">
             <Tooltip label="Hit Rate" help={explanations['Hit Rate']} />
-            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 6 }}>
+            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 8 }}>
               {Math.round(signal.historicalHitRate * 100)}%
             </div>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -231,7 +218,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
           </div>
           <div className="section-card">
             <Tooltip label="Edge Window" help={explanations['Edge Window']} />
-            <div className="data-value" style={{ fontSize: 'var(--text-xl)', marginTop: 6 }}>
+            <div className="data-value" style={{ fontSize: 'var(--text-xl)', marginTop: 8 }}>
               {signal.edgeWindow}
             </div>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -240,7 +227,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
           </div>
           <div className="section-card">
             <Tooltip label="Confidence" help={explanations['Confidence']} />
-            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 6 }}>
+            <div className="data-value" style={{ fontSize: 'var(--text-2xl)', marginTop: 8 }}>
               {Math.round(signal.confidenceScore * 100)}%
             </div>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -250,8 +237,8 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         </div>
 
         {/* Layers Fired */}
-        <div className="section-card" style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div className="section-card" style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)' }}>
               Active Layers
             </h2>
@@ -259,15 +246,16 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
               Independent data sources that triggered
             </span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(signal.layersWithLinks || signal.layersFired.map((text, i) => ({ text, url: '' }))).map((layer, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{
-                  width: 6,
-                  height: 6,
+                  width: 7,
+                  height: 7,
                   borderRadius: '50%',
                   background: 'var(--positive)',
                   flexShrink: 0,
+                  boxShadow: '0 0 6px rgba(16, 185, 129, 0.3)',
                 }} />
                 {layer.url ? (
                   <a
@@ -281,12 +269,13 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
+                      transition: 'color 0.15s ease',
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent)'}
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent-text)'}
                     onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
                   >
                     <span>{layer.text}</span>
-                    <svg style={{ width: 12, height: 12, opacity: 0.5 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg style={{ width: 12, height: 12, opacity: 0.4 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                     </svg>
                   </a>
@@ -299,12 +288,12 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         </div>
 
         {/* Asset Impact */}
-        <div className="section-card" style={{ marginBottom: 12 }}>
-          <div style={{ marginBottom: 14 }}>
+        <div className="section-card" style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)' }}>
               Expected Asset Moves
             </h2>
-            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 3 }}>
               Based on historical patterns when similar signals fired
             </p>
           </div>
@@ -314,7 +303,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '10px 0',
+                padding: '12px 0',
                 borderBottom: idx < signal.assetImpact.length - 1 ? '1px solid var(--border-subtle)' : 'none',
               }}>
                 <div>
@@ -341,7 +330,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
                       {asset.asset}
                     </div>
                   )}
-                  <div className="tooltip-wrap" style={{ marginTop: 2 }}>
+                  <div className="tooltip-wrap" style={{ marginTop: 3 }}>
                     <span style={{
                       fontSize: 'var(--text-xs)',
                       color: 'var(--text-muted)',
@@ -368,19 +357,19 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
 
         {/* Historical Precedent */}
         {signal.historicalPrecedent && signal.historicalPrecedent.length > 0 && (
-          <div className="section-card" style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 14 }}>
+          <div className="section-card" style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 16 }}>
               <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--text-primary)' }}>
                 Historical Precedent
               </h2>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 3 }}>
                 Past events with similar confluence patterns
               </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {signal.historicalPrecedent.slice(0, 3).map((event, idx) => (
                 <div key={idx} style={{
-                  padding: '10px 12px',
+                  padding: '12px 14px',
                   background: 'rgba(255,255,255,0.02)',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border-subtle)',
@@ -389,13 +378,13 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
                     fontSize: 'var(--text-xs)',
                     color: 'var(--text-muted)',
                     fontFamily: 'var(--font-mono)',
-                    marginBottom: 4,
+                    marginBottom: 5,
                   }}>{event.date}</div>
                   <div style={{
                     fontSize: 'var(--text-base)',
                     color: 'var(--text-secondary)',
-                    lineHeight: 1.45,
-                    marginBottom: 4,
+                    lineHeight: 1.5,
+                    marginBottom: 5,
                   }}>{event.outcome}</div>
                   <div style={{
                     fontFamily: 'var(--font-mono)',
@@ -411,13 +400,27 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
 
         {/* Edge Decay */}
         <div style={{
-          padding: 16,
+          padding: 18,
           background: 'var(--warning-muted)',
-          border: '1px solid rgba(234, 179, 8, 0.2)',
+          border: '1px solid rgba(245, 158, 11, 0.15)',
           borderRadius: 'var(--radius-lg)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <span style={{ fontSize: 18, lineHeight: 1 }}>⏱</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+            <div style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: 'rgba(245, 158, 11, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
             <div>
               <h3 style={{
                 fontSize: 'var(--text-md)',
@@ -430,7 +433,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
               <p style={{
                 fontSize: 'var(--text-sm)',
                 color: 'var(--text-secondary)',
-                lineHeight: 1.55,
+                lineHeight: 1.6,
               }}>
                 Historically, this signal type gets priced in within <strong style={{ color: 'var(--text-primary)' }}>{signal.edgeWindow}</strong>.
                 Detected at {new Date(signal.timestamp).toLocaleTimeString()}.
