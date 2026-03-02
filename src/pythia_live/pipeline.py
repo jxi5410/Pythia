@@ -48,9 +48,11 @@ class SpikeProxy:
 
 def llm_call(prompt: str) -> str:
     """Call Claude via subprocess for LLM inference."""
+    from .llm_integration import sanitize_llm_input
+    prompt = sanitize_llm_input(prompt)
     try:
         result = subprocess.run(
-            ['claude', '--print', '--model', 'sonnet', prompt],
+            ['claude', '--print', '--model', 'sonnet', '-p', prompt],
             capture_output=True, text=True, timeout=90,
         )
         return result.stdout.strip()

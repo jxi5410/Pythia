@@ -487,6 +487,8 @@ def _llm_refine_matches(all_matches: List[dict], ambiguous: List[dict]) -> List[
             + "\n".join(prompt_parts)
         )
 
+        from .llm_integration import sanitize_llm_input
+        prompt = sanitize_llm_input(prompt)
         result = subprocess.run(
             ["claude", "--print", "--model", "sonnet", "-p", prompt],
             capture_output=True, text=True, timeout=30,

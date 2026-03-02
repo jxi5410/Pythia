@@ -18,8 +18,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from .confluence import get_confluence_history
@@ -38,6 +39,20 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("PYTHIA_DB_PATH", "data/pythia_live.db")
 WATCHLISTS_PATH = os.environ.get("PYTHIA_WATCHLISTS_PATH", "data/watchlists.json")
+
+# API key authentication — set PYTHIA_API_KEY env var to enable
+API_KEY = os.environ.get("PYTHIA_API_KEY", "")
+CORS_ORIGINS = os.environ.get("PYTHIA_CORS_ORIGINS", "*").split(",")
+
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def _verify_api_key(api_key: Optional[str] = Security(_api_key_header)):
+    """Verify API key if PYTHIA_API_KEY is configured. No-op if unset."""
+    if not API_KEY:
+        return  # Auth disabled — no key configured
+    if not api_key or api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 def _get_db() -> PythiaDB:
@@ -62,12 +77,13 @@ app = FastAPI(
         "Cross-layer confluence detection, regime analysis, "
         "contract details, and historical track record."
     ),
+    dependencies=[Depends(_verify_api_key)],
 )
 
-# CORS — allow all origins for development
+# CORS — configurable via PYTHIA_CORS_ORIGINS env var (default: "*" for dev)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

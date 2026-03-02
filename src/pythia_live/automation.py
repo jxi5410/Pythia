@@ -3,6 +3,8 @@ Automation Controller for Pythia Live
 Manages autonomous operation of the trading system
 """
 
+import logging
+import sqlite3
 import time
 import json
 from datetime import datetime, timedelta
@@ -13,6 +15,8 @@ from .database import PythiaDB
 from .detector import SignalDetector, Signal
 from .alerts import TelegramAlerter
 from .paper_trading import PaperTrading
+
+logger = logging.getLogger(__name__)
 
 
 class AutomationController:
@@ -43,10 +47,10 @@ class AutomationController:
         
     def start_automation(self):
         """Start the automation loop."""
-        print("🤖 Starting Pythia Automation Controller...")
-        print(f"   Initial Capital: ${self.config.get('initial_capital', 10000):,.2f}")
-        print(f"   Max Daily Trades: {self.config.get('max_daily_trades', 10)}")
-        print(f"   Daily Loss Limit: {self.config.get('daily_loss_limit', 0.10):.1%}")
+        logger.info("Starting Pythia Automation Controller...")
+        logger.info("  Initial Capital: $%,.2f", self.config.get('initial_capital', 10000))
+        logger.info("  Max Daily Trades: %d", self.config.get('max_daily_trades', 10))
+        logger.info("  Daily Loss Limit: %.1f%%", self.config.get('daily_loss_limit', 0.10) * 100)
         
         self.running = True
         self._send_startup_message()
@@ -63,7 +67,7 @@ class AutomationController:
                 
                 # Check risk limits
                 if self._check_risk_limits():
-                    print("⚠️ Risk limit hit - pausing auto-trading")
+                    logger.warning("Risk limit hit - pausing auto-trading")
                     time.sleep(300)  # 5 min cooldown
                     continue
                 
@@ -79,7 +83,7 @@ class AutomationController:
                 time.sleep(sleep_time)
                 
         except KeyboardInterrupt:
-            print("\n👋 Stopping automation...")
+            logger.info("Stopping automation...")
             self._send_shutdown_message()
             self.running = False
     
@@ -88,7 +92,7 @@ class AutomationController:
         now = datetime.now()
         if now.hour == 0 and now.minute < 5:  # First 5 min of day
             if self.trades_today > 0:
-                print(f"📅 New day - resetting counters (yesterday: {self.trades_today} trades)")
+                logger.info("New day - resetting counters (yesterday: %d trades)", self.trades_today)
                 self.trades_today = 0
                 self.daily_pnl = 0
     
@@ -112,7 +116,7 @@ class AutomationController:
             
             # Check daily trade limit
             if self.trades_today >= self.config.get('max_daily_trades', 10):
-                print(f"⚠️ Daily trade limit reached ({self.trades_today})")
+                logger.warning("Daily trade limit reached (%d)", self.trades_today)
                 break
             
             # Create paper trade
@@ -120,8 +124,8 @@ class AutomationController:
             
             if trade_id:
                 self.trades_today += 1
-                print(f"📝 Auto-trade created: {signal['signal_type']} | "
-                      f"{signal['title'][:50]}... | Trade #{trade_id}")
+                logger.info("Auto-trade created: %s | %s... | Trade #%s",
+                           signal['signal_type'], signal['title'][:50], trade_id)
                 
                 # Send confirmation
                 self.alerter._send_message(
@@ -179,7 +183,7 @@ class AutomationController:
         if self.last_snapshot is None or (now - self.last_snapshot).hours >= 1:
             self.paper_trading.record_portfolio_snapshot()
             self.last_snapshot = now
-            print(f"📸 Portfolio snapshot taken")
+            logger.info("Portfolio snapshot taken")
     
     def _maybe_send_eod_report(self):
         """Send end-of-day report."""
@@ -212,7 +216,7 @@ class AutomationController:
         """
         
         self.alerter._send_message(message)
-        print("📊 EOD report sent")
+        logger.info("EOD report sent")
     
     def _send_startup_message(self):
         """Send automation startup message."""

@@ -229,8 +229,8 @@ class PatternLibrary:
         return signal
 
 
-def enrich_signals_with_patterns(signals: List[Signal],
-                                 library_path: Optional[str] = None) -> List[Signal]:
+def enrich_signals_with_patterns(signals: List["Signal"],
+                                 library_path: Optional[str] = None) -> List["Signal"]:
     """
     Convenience function: enrich list of signals with pattern library context.
     """

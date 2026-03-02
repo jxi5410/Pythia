@@ -24,7 +24,10 @@ from .causal_v2 import classify_market
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 CACHE_DIR = DATA_DIR / "equity_cache"
-PATTERN_LIBRARY = Path("/Users/xj.ai/.openclaw/workspace/pythia_pattern_library.json")
+PATTERN_LIBRARY = Path(os.environ.get(
+    "PYTHIA_PATTERN_LIBRARY",
+    str(BASE_DIR / "data" / "pythia_pattern_library.json"),
+))
 DEFAULT_DB = DATA_DIR / "pythia_live.db"
 
 
@@ -192,6 +195,182 @@ def run_backtest(spikes: List[Dict],
                  "spike_magnitude", "ticker", "return_1h", "return_4h",
                  "return_24h", "direction_match"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Walk-Forward Out-of-Sample Backtesting
+# ---------------------------------------------------------------------------
+
+def walk_forward_backtest(
+    spikes: List[Dict],
+    train_ratio: float = 0.6,
+    n_folds: int = 5,
+    lookback_hours: List[int] = None,
+) -> Dict:
+    """
+    Walk-forward validation: train on window A, test on window B, slide forward.
+
+    Splits spikes chronologically into rolling train/test windows to detect
+    overfitting. If in-sample hit rate >> out-of-sample hit rate, the signal
+    rules are overfit.
+
+    Args:
+        spikes: List of spike dicts with 'timestamp' fields.
+        train_ratio: Fraction of each fold used for training (default 60%).
+        n_folds: Number of rolling folds.
+        lookback_hours: Price reaction windows to test.
+
+    Returns:
+        Dict with per-fold and aggregate metrics, plus overfitting diagnostics.
+    """
+    if lookback_hours is None:
+        lookback_hours = [1, 4]
+
+    # Sort spikes chronologically
+    dated_spikes = []
+    for s in spikes:
+        ts = s.get("timestamp", "")
+        if not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            continue
+        dated_spikes.append({**s, "_parsed_ts": dt})
+
+    dated_spikes.sort(key=lambda x: x["_parsed_ts"])
+
+    if len(dated_spikes) < 20:
+        logger.warning("Too few spikes (%d) for walk-forward validation", len(dated_spikes))
+        return {"error": "insufficient_data", "spike_count": len(dated_spikes)}
+
+    # Calculate fold size
+    total = len(dated_spikes)
+    step = max(1, (total - int(total * train_ratio)) // max(n_folds - 1, 1))
+    train_size = int(total * train_ratio)
+
+    fold_results = []
+
+    for fold_idx in range(n_folds):
+        start = fold_idx * step
+        train_end = start + train_size
+        test_end = min(train_end + step, total)
+
+        if train_end >= total or test_end > total:
+            break
+
+        train_set = dated_spikes[start:train_end]
+        test_set = dated_spikes[train_end:test_end]
+
+        if not train_set or not test_set:
+            continue
+
+        # Run backtest on train and test sets independently
+        train_results = run_backtest(train_set, lookback_hours)
+        test_results = run_backtest(test_set, lookback_hours)
+
+        train_hit = (
+            train_results["direction_match"].mean() * 100
+            if not train_results.empty and len(train_results) > 0
+            else None
+        )
+        test_hit = (
+            test_results["direction_match"].mean() * 100
+            if not test_results.empty and len(test_results) > 0
+            else None
+        )
+
+        train_return = (
+            train_results["return_4h"].mean()
+            if not train_results.empty and "return_4h" in train_results.columns
+            else None
+        )
+        test_return = (
+            test_results["return_4h"].mean()
+            if not test_results.empty and "return_4h" in test_results.columns
+            else None
+        )
+
+        fold_results.append({
+            "fold": fold_idx + 1,
+            "train_period": {
+                "start": train_set[0]["_parsed_ts"].isoformat(),
+                "end": train_set[-1]["_parsed_ts"].isoformat(),
+                "count": len(train_set),
+            },
+            "test_period": {
+                "start": test_set[0]["_parsed_ts"].isoformat(),
+                "end": test_set[-1]["_parsed_ts"].isoformat(),
+                "count": len(test_set),
+            },
+            "in_sample_hit_rate": round(train_hit, 1) if train_hit is not None else None,
+            "out_of_sample_hit_rate": round(test_hit, 1) if test_hit is not None else None,
+            "in_sample_avg_return_4h": round(train_return, 4) if train_return is not None else None,
+            "out_of_sample_avg_return_4h": round(test_return, 4) if test_return is not None else None,
+            "in_sample_obs": len(train_results),
+            "out_of_sample_obs": len(test_results),
+        })
+
+    # Aggregate diagnostics
+    is_hits = [f["in_sample_hit_rate"] for f in fold_results if f["in_sample_hit_rate"] is not None]
+    oos_hits = [f["out_of_sample_hit_rate"] for f in fold_results if f["out_of_sample_hit_rate"] is not None]
+    is_returns = [f["in_sample_avg_return_4h"] for f in fold_results if f["in_sample_avg_return_4h"] is not None]
+    oos_returns = [f["out_of_sample_avg_return_4h"] for f in fold_results if f["out_of_sample_avg_return_4h"] is not None]
+
+    avg_is_hit = sum(is_hits) / len(is_hits) if is_hits else None
+    avg_oos_hit = sum(oos_hits) / len(oos_hits) if oos_hits else None
+    avg_is_ret = sum(is_returns) / len(is_returns) if is_returns else None
+    avg_oos_ret = sum(oos_returns) / len(oos_returns) if oos_returns else None
+
+    hit_rate_decay = (
+        round(avg_is_hit - avg_oos_hit, 1)
+        if avg_is_hit is not None and avg_oos_hit is not None
+        else None
+    )
+    return_decay = (
+        round(avg_is_ret - avg_oos_ret, 4)
+        if avg_is_ret is not None and avg_oos_ret is not None
+        else None
+    )
+
+    # Overfitting flag: >15pp hit rate decay or >50% return decay
+    overfit_flag = False
+    if hit_rate_decay is not None and hit_rate_decay > 15:
+        overfit_flag = True
+    if avg_is_ret and avg_oos_ret and avg_is_ret > 0 and avg_oos_ret / avg_is_ret < 0.5:
+        overfit_flag = True
+
+    summary = {
+        "total_spikes": len(dated_spikes),
+        "folds_completed": len(fold_results),
+        "folds": fold_results,
+        "aggregate": {
+            "avg_in_sample_hit_rate": round(avg_is_hit, 1) if avg_is_hit is not None else None,
+            "avg_out_of_sample_hit_rate": round(avg_oos_hit, 1) if avg_oos_hit is not None else None,
+            "hit_rate_decay_pp": hit_rate_decay,
+            "avg_in_sample_return_4h": round(avg_is_ret, 4) if avg_is_ret is not None else None,
+            "avg_out_of_sample_return_4h": round(avg_oos_ret, 4) if avg_oos_ret is not None else None,
+            "return_decay": return_decay,
+        },
+        "overfitting_detected": overfit_flag,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    logger.info(
+        "Walk-forward complete: %d folds | IS hit=%.1f%% OOS hit=%.1f%% | decay=%.1fpp | overfit=%s",
+        len(fold_results),
+        avg_is_hit or 0, avg_oos_hit or 0, hit_rate_decay or 0,
+        overfit_flag,
+    )
+
+    # Save results
+    report_path = DATA_DIR / "walk_forward_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    logger.info("Walk-forward report saved to %s", report_path)
+
+    return summary
 
 
 # ---------------------------------------------------------------------------
