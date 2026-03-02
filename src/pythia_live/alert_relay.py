@@ -3,12 +3,19 @@ Pythia Alert Relay — writes signals to a file that OpenClaw picks up.
 Avoids needing a separate Telegram bot.
 """
 import json
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 from .detector import Signal
 
-RELAY_FILE = Path("/Users/xj.ai/.openclaw/workspace/pythia_alerts.jsonl")
+logger = logging.getLogger(__name__)
+
+RELAY_FILE = Path(os.environ.get(
+    "PYTHIA_RELAY_FILE",
+    str(Path(__file__).resolve().parent.parent.parent / "data" / "pythia_alerts.jsonl"),
+))
 
 
 def relay_signal(signal: Signal, pattern_insight: str = "") -> bool:
@@ -49,5 +56,5 @@ def relay_signal(signal: Signal, pattern_insight: str = "") -> bool:
             f.write(json.dumps(entry) + "\n")
         return True
     except Exception as e:
-        print(f"Alert relay error: {e}")
+        logger.error("Alert relay error: %s", e)
         return False

@@ -113,8 +113,10 @@ def _llm_ticker_fallback(market_title: str) -> List[Dict]:
         '[{"ticker": "SPY", "name": "S&P 500", "relation": "broad_market"}]'
     )
     try:
+        from .llm_integration import sanitize_llm_input
+        prompt = sanitize_llm_input(prompt)
         result = subprocess.run(
-            ['claude', '--print', '--model', 'sonnet', prompt],
+            ['claude', '--print', '--model', 'sonnet', '-p', prompt],
             capture_output=True, text=True, timeout=30,
         )
         import re

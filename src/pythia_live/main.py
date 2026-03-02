@@ -22,14 +22,10 @@ from .news_context import get_news_context
 from .spike_archive import detect_spike, attribute_spike, save_spike, SpikeEvent
 from .patterns import build_patterns, find_matching_pattern, format_pattern_insight
 
-# Governance layer
-try:
-    from .governance import init_governance, GovernanceConfig, get_governance
-    from .causal_v2 import attribute_spike_with_governance
-    GOVERNANCE_ENABLED = True
-except ImportError:
-    GOVERNANCE_ENABLED = False
-    logger.warning("Governance module not available")
+# Governance layer — mandatory for compliance (Singapore IMDA + UC Berkeley)
+from .governance import init_governance, GovernanceConfig, get_governance
+from .causal_v2 import attribute_spike_with_governance
+GOVERNANCE_ENABLED = True
 
 # Import connectors
 try:
@@ -127,36 +123,34 @@ class PythiaLive:
         self._patterns_last_built = None
         
         # Initialize governance layer
-        if GOVERNANCE_ENABLED:
-            audit_dir = Path(self.config.DB_PATH).parent / "audit_trails"
-            gov_config = GovernanceConfig(
-                max_cost_per_hour=10.0,
-                max_cost_per_run=2.0,
-                emergency_shutdown_threshold=50.0,
-                min_confidence_auto_relay=0.85,
-                min_confidence_flag_review=0.70,
-                audit_trail_enabled=True,
-                sandbox_mode=False  # Set True to prevent real signals
-            )
-            init_governance(gov_config, audit_dir)
-            logger.info("✓ Governance layer initialized (audit dir: %s)", audit_dir)
-        else:
-            logger.warning("⚠ Running WITHOUT governance layer - compliance features disabled")
+        # Governance is mandatory — system will not start without it
+        audit_dir = Path(self.config.DB_PATH).parent / "audit_trails"
+        gov_config = GovernanceConfig(
+            max_cost_per_hour=10.0,
+            max_cost_per_run=2.0,
+            emergency_shutdown_threshold=50.0,
+            min_confidence_auto_relay=0.85,
+            min_confidence_flag_review=0.70,
+            audit_trail_enabled=True,
+            sandbox_mode=False  # Set True to prevent real signals
+        )
+        init_governance(gov_config, audit_dir)
+        logger.info("Governance layer initialized (audit dir: %s)", audit_dir)
 
     def run(self):
         """
         Main execution loop - chooses WebSocket or HTTP based on mode.
         """
-        print("PYTHIA LIVE - Starting...")
-        print(f"Mode: {self.mode}")
-        print(f"Connectors: {', '.join(self.connectors.keys())}")
-        
+        logger.info("PYTHIA LIVE - Starting...")
+        logger.info("Mode: %s", self.mode)
+        logger.info("Connectors: %s", ', '.join(self.connectors.keys()))
+
         # Use WebSocket if available and not explicitly HTTP mode
         if self.market_stream and self.mode != "http":
-            print("Using REAL-TIME WebSocket streaming (sub-second updates)")
+            logger.info("Using REAL-TIME WebSocket streaming (sub-second updates)")
             asyncio.run(self._run_websocket())
         else:
-            print("Using HTTP polling (60s interval)")
+            logger.info("Using HTTP polling (60s interval)")
             self._run_http_polling()
     
     async def _run_websocket(self):
@@ -165,16 +159,15 @@ class PythiaLive:
         
         # Initial market discovery
         markets = self._discover_markets()
-        print(f"Found {len(markets)} liquid markets")
-        
+        logger.info("Found %d liquid markets", len(markets))
+
         # Send startup message
         self.alerter.send_startup_message(len(markets))
-        
+
         # Get market IDs for top 50 liquid markets
         market_ids = [m['id'] for m in markets[:50]]
-        
-        print(f"\nStreaming {len(market_ids)} markets in real-time...")
-        print("Press Ctrl+C to stop\n")
+
+        logger.info("Streaming %d markets in real-time...", len(market_ids))
         
         # Start pattern rebuild task
         pattern_rebuild_task = asyncio.create_task(self._periodic_pattern_rebuild())
@@ -187,7 +180,7 @@ class PythiaLive:
                 on_trade=self._handle_realtime_trade,
             )
         except KeyboardInterrupt:
-            print("\n\nStopping Pythia Live...")
+            logger.info("Stopping Pythia Live...")
             self.running = False
             pattern_rebuild_task.cancel()
             await self.market_stream.stop()
@@ -316,7 +309,7 @@ class PythiaLive:
         
         # Handle detected signals
         if signals_found:
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] {len(signals_found)} signals detected from {updates_processed} updates")
+            logger.info("%d signals detected from %d updates", len(signals_found), updates_processed)
             self._handle_signals(signals_found)
         else:
             logger.debug(f"Processed {updates_processed} price updates, no signals")
@@ -327,22 +320,19 @@ class PythiaLive:
 
         # Initial market discovery
         markets = self._discover_markets()
-        print(f"Found {len(markets)} liquid markets")
+        logger.info("Found %d liquid markets", len(markets))
 
         # Send startup message
         self.alerter.send_startup_message(len(markets))
 
-        print(f"\nPolling every {self.config.POLL_INTERVAL}s")
-        print("Press Ctrl+C to stop\n")
+        logger.info("Polling every %ds", self.config.POLL_INTERVAL)
 
         try:
             while self.running:
                 self.cycle_count += 1
                 cycle_start = time.time()
 
-                print(f"\n{'='*60}")
-                print(f"Cycle {self.cycle_count} | {datetime.now().strftime('%H:%M:%S')}")
-                print('='*60)
+                logger.info("Cycle %d | %s", self.cycle_count, datetime.now().strftime('%H:%M:%S'))
 
                 # 1. Update market list and rebuild patterns (every 10 cycles)
                 if self.cycle_count % 10 == 0:
@@ -368,30 +358,30 @@ class PythiaLive:
 
                 # 4. Send batch summary if signals found
                 if all_signals:
-                    print(f"\n{len(all_signals)} signals detected")
+                    logger.info("%d signals detected", len(all_signals))
                     self._handle_signals(all_signals)
                 else:
-                    print("\nNo significant signals")
+                    logger.debug("No significant signals")
 
                 # 5. Sleep until next cycle
                 elapsed = time.time() - cycle_start
                 sleep_time = max(0, self.config.POLL_INTERVAL - elapsed)
 
                 if sleep_time > 0:
-                    print(f"Sleeping {sleep_time:.1f}s...")
+                    logger.debug("Sleeping %.1fs...", sleep_time)
                     time.sleep(sleep_time)
 
         except KeyboardInterrupt:
-            print("\n\nStopping Pythia Live...")
+            logger.info("Stopping Pythia Live...")
             self.running = False
 
     def _discover_markets(self) -> List[Dict]:
-        """Discover liquid markets from all sources."""
+        """Discover liquid markets from all sources, then deduplicate."""
         all_markets = []
 
         for source, connector in self.connectors.items():
             try:
-                print(f"Fetching {source} markets...")
+                logger.info("Fetching %s markets...", source)
                 markets = connector.get_active_markets(limit=100)
 
                 # Filter by liquidity
@@ -404,14 +394,75 @@ class PythiaLive:
                 for m in liquid:
                     self.db.save_market(m)
 
-                print(f"  {source}: {len(liquid)} liquid markets")
+                logger.info("  %s: %d liquid markets", source, len(liquid))
 
             except Exception as e:
-                print(f"  {source} error: {e}")
+                logger.error("  %s error: %s", source, e)
+
+        # Deduplicate cross-platform: same event on multiple sources
+        before_dedup = len(all_markets)
+        all_markets = self._deduplicate_markets(all_markets)
+        if before_dedup != len(all_markets):
+            logger.info("Deduplicated %d → %d markets", before_dedup, len(all_markets))
 
         # Sort by liquidity
         all_markets.sort(key=lambda x: x.get('liquidity', 0), reverse=True)
         return all_markets
+
+    @staticmethod
+    def _deduplicate_markets(markets: List[Dict]) -> List[Dict]:
+        """
+        Deduplicate markets that represent the same event across platforms.
+
+        Uses title similarity to detect duplicates. When a duplicate is found,
+        keeps the entry with higher liquidity (more reliable pricing).
+        """
+        if not markets:
+            return markets
+
+        def _normalize_title(title: str) -> str:
+            """Normalize title for comparison: lowercase, strip punctuation."""
+            import re
+            t = title.lower().strip()
+            t = re.sub(r'[^a-z0-9\s]', '', t)
+            t = re.sub(r'\s+', ' ', t)
+            return t
+
+        def _title_similarity(a: str, b: str) -> float:
+            """Word-overlap Jaccard similarity between two titles."""
+            words_a = set(_normalize_title(a).split())
+            words_b = set(_normalize_title(b).split())
+            if not words_a or not words_b:
+                return 0.0
+            intersection = words_a & words_b
+            union = words_a | words_b
+            return len(intersection) / len(union) if union else 0.0
+
+        # Group by approximate title match
+        kept = []
+        used = set()
+        SIMILARITY_THRESHOLD = 0.7
+
+        for i, market in enumerate(markets):
+            if i in used:
+                continue
+
+            best = market
+            title_i = market.get('title', '')
+
+            for j in range(i + 1, len(markets)):
+                if j in used:
+                    continue
+                title_j = markets[j].get('title', '')
+                if _title_similarity(title_i, title_j) >= SIMILARITY_THRESHOLD:
+                    used.add(j)
+                    # Keep whichever has more liquidity
+                    if markets[j].get('liquidity', 0) > best.get('liquidity', 0):
+                        best = markets[j]
+
+            kept.append(best)
+
+        return kept
 
     def _fetch_all_trades(self) -> List[Dict]:
         """Fetch recent trades from all connectors and save to DB."""
@@ -519,57 +570,41 @@ class PythiaLive:
                     market.get('title', ''), market.get('description', '')
                 )['asset_class']
                 
-                # Use governance-wrapped attribution if available
-                if GOVERNANCE_ENABLED:
-                    try:
-                        result, audit_trail = attribute_spike_with_governance(spike)
-                        
-                        # Check decision gate
-                        decision = result.get('decision', 'REJECT')
-                        confidence = result.get('final_confidence', 0.0)
-                        
-                        if decision == "AUTO_RELAY":
-                            # High confidence - relay signal automatically
-                            spike.attributed_events = [result['attribution']['most_likely_cause']]
-                            save_spike(self.db, spike)
-                            logger.info("✓ Spike AUTO-RELAYED: %s %.1f%% (confidence: %.2f)",
-                                       spike.market_title[:50], spike.magnitude * 100, confidence)
-                        
-                        elif decision == "FLAG_REVIEW":
-                            # Medium confidence - save but flag for human review
-                            spike.attributed_events = [result['attribution']['most_likely_cause']]
-                            spike.manual_tag = "PENDING_HUMAN_REVIEW"
-                            save_spike(self.db, spike)
-                            logger.warning("⚠ Spike FLAGGED FOR REVIEW: %s (confidence: %.2f)",
-                                          spike.market_title[:50], confidence)
-                        
-                        else:  # REJECT
-                            # Low confidence - archive but don't relay
-                            spike.manual_tag = "LOW_CONFIDENCE_REJECTED"
-                            save_spike(self.db, spike)
-                            logger.info("✗ Spike REJECTED: %s (confidence: %.2f)",
-                                       spike.market_title[:50], confidence)
-                    
-                    except Exception as e:
-                        logger.error("Governance attribution failed for %s: %s", market_id, e)
-                        # Fallback: save spike without attribution
+                # Governance-wrapped attribution (mandatory)
+                try:
+                    result, audit_trail = attribute_spike_with_governance(spike)
+
+                    # Check decision gate
+                    decision = result.get('decision', 'REJECT')
+                    confidence = result.get('final_confidence', 0.0)
+
+                    if decision == "AUTO_RELAY":
+                        spike.attributed_events = [result['attribution']['most_likely_cause']]
                         save_spike(self.db, spike)
-                
-                else:
-                    # No governance - use legacy attribution
-                    try:
-                        spike = attribute_spike(spike)
-                    except Exception as e:
-                        logger.warning("Spike attribution failed for %s: %s", market_id, e)
+                        logger.info("Spike AUTO-RELAYED: %s %.1f%% (confidence: %.2f)",
+                                   spike.market_title[:50], spike.magnitude * 100, confidence)
+
+                    elif decision == "FLAG_REVIEW":
+                        spike.attributed_events = [result['attribution']['most_likely_cause']]
+                        spike.manual_tag = "PENDING_HUMAN_REVIEW"
+                        save_spike(self.db, spike)
+                        logger.warning("Spike FLAGGED FOR REVIEW: %s (confidence: %.2f)",
+                                      spike.market_title[:50], confidence)
+
+                    else:  # REJECT
+                        spike.manual_tag = "LOW_CONFIDENCE_REJECTED"
+                        save_spike(self.db, spike)
+                        logger.info("Spike REJECTED: %s (confidence: %.2f)",
+                                   spike.market_title[:50], confidence)
+
+                except Exception as e:
+                    logger.error("Governance attribution failed for %s: %s", market_id, e)
                     save_spike(self.db, spike)
-                    logger.info("Spike archived: %s %s %.1f%% on %s",
-                               spike.direction, spike.market_title,
-                               spike.magnitude * 100, market_id)
 
             return signals
 
         except Exception as e:
-            print(f"  Error processing {market_id}: {e}")
+            logger.error("Error processing %s: %s", market_id, e)
             return []
 
     def _handle_signals(self, signals: List[Signal]):
@@ -598,7 +633,7 @@ class PythiaLive:
             # Relay all HIGH/CRITICAL signals for OpenClaw to push
             if signal.severity in ["HIGH", "CRITICAL"]:
                 relay_signal(signal, pattern_insight=signal.metadata.get('pattern_insight', ''))
-                print(f"  Signal relayed: {signal.signal_type} ({signal.severity})")
+                logger.info("Signal relayed: %s (%s)", signal.signal_type, signal.severity)
 
                 # Also try Telegram direct (if configured)
                 sent = self.alerter.send_signal(
@@ -610,10 +645,8 @@ class PythiaLive:
                     self.db.mark_alert_sent(signal_id, "telegram", "SENT")
 
         # Summary
-        print(f"\nSignal Summary:")
-        print(f"  Critical: {critical_count}")
-        print(f"  High: {high_count}")
-        print(f"  Medium: {len([s for s in signals if s.severity == 'MEDIUM'])}")
+        medium_count = len([s for s in signals if s.severity == 'MEDIUM'])
+        logger.info("Signal summary: Critical=%d High=%d Medium=%d", critical_count, high_count, medium_count)
 
     def _get_market_url(self, market_id: str) -> str:
         """Generate market URL based on ID pattern."""

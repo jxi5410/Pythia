@@ -264,9 +264,9 @@ class SignalDetector:
 
         prices = price_history['yes_price'].values
 
-        # Calculate short and long MA
-        short_ma = np.mean(prices[:5])  # Last 5 points
-        long_ma = np.mean(prices[-10:])  # Earlier 10 points
+        # Calculate short and long MA (prices ordered most-recent-first)
+        short_ma = np.mean(prices[:5])   # Most recent 5 points
+        long_ma = np.mean(prices[:10])   # Most recent 10 points (longer window)
 
         current = prices[0]
 

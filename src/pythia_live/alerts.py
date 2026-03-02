@@ -2,9 +2,12 @@
 Telegram Alert System — Intelligence Briefing Format
 Real-time notifications for trading signals + Query commands
 """
+import logging
 import requests
 from typing import Optional, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from .database import PythiaDB
 from .detector import Signal
@@ -66,7 +69,7 @@ class TelegramAlerter:
     def send_signal(self, signal: Signal, market_title: str, market_url: str = "") -> bool:
         """Send a signal alert as an intelligence briefing."""
         if not self.enabled:
-            print(f"[ALERT] Telegram not configured. Signal: {signal.description}")
+            logger.warning("Telegram not configured. Signal: %s", signal.description)
             return False
 
         if signal.severity in ("CRITICAL", "HIGH"):
@@ -256,7 +259,7 @@ Ready to detect alpha.
             return True
 
         except Exception as e:
-            print(f"Telegram send failed: {e}")
+            logger.error("Telegram send failed: %s", e)
             return False
 
 
