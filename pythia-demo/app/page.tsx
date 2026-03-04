@@ -90,7 +90,7 @@ export default function Home() {
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <Link href="/tracking" style={{
+              <Link href="/markets" style={{
                 fontSize: 'var(--text-xs)',
                 color: 'var(--accent-text)',
                 background: 'var(--accent-muted)',
@@ -101,6 +101,18 @@ export default function Home() {
                 letterSpacing: '0.01em',
                 transition: 'all 0.2s ease',
                 border: '1px solid rgba(99, 91, 255, 0.15)',
+              }}>
+                Markets
+              </Link>
+              <Link href="/tracking" style={{
+                fontSize: 'var(--text-xs)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-default)',
+                padding: '6px 14px',
+                borderRadius: 100,
+                textDecoration: 'none',
+                fontWeight: 500,
+                transition: 'all 0.2s ease',
               }}>
                 Track Record
               </Link>
