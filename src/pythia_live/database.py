@@ -203,6 +203,89 @@ class PythiaDB:
                 ON confluence_events(confluence_score)
             """)
 
+            # --- Probability models (v0.8 - Quant layer) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS probability_models (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market_id TEXT UNIQUE,
+                    alpha REAL,
+                    beta_param REAL,
+                    mu REAL,
+                    sigma REAL,
+                    jump_intensity REAL,
+                    jump_mean REAL,
+                    jump_std REAL,
+                    n_observations INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # --- Forecasts (v0.8 - Calibration layer) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS forecasts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market_id TEXT,
+                    forecast_prob REAL,
+                    signal_type TEXT,
+                    actual_outcome REAL,
+                    brier_score REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_forecasts_market
+                ON forecasts(market_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_forecasts_resolved
+                ON forecasts(resolved_at)
+            """)
+
+            # --- Risk snapshots (v0.8 - EVT layer) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS risk_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    portfolio_var_95 REAL,
+                    portfolio_var_99 REAL,
+                    expected_shortfall_95 REAL,
+                    expected_shortfall_99 REAL,
+                    gpd_shape REAL,
+                    gpd_scale REAL,
+                    n_positions INTEGER,
+                    total_exposure REAL,
+                    stress_test_results TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_risk_time
+                ON risk_snapshots(timestamp)
+            """)
+
+            # --- Correlation pairs (v0.8 - Statistical correlation layer) ---
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS correlation_pairs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market_id_a TEXT,
+                    market_id_b TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    spearman_rho REAL,
+                    p_value REAL,
+                    rolling_corr_7d REAL,
+                    n_observations INTEGER,
+                    UNIQUE(market_id_a, market_id_b, timestamp)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_corr_pair
+                ON correlation_pairs(market_id_a, market_id_b)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_corr_time
+                ON correlation_pairs(timestamp)
+            """)
+
             conn.commit()
 
     # ------------------------------------------------------------------
@@ -462,6 +545,207 @@ class PythiaDB:
                 (json.dumps(reaction), spike_id)
             )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Queries (unchanged interface)
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Probability Models (v0.8)
+    # ------------------------------------------------------------------
+
+    def save_probability_model(self, market_id: str, params: Dict):
+        """Save or update probability model parameters for a market."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO probability_models
+                (market_id, alpha, beta_param, mu, sigma,
+                 jump_intensity, jump_mean, jump_std, n_observations, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                market_id,
+                params.get('alpha', 1.0),
+                params.get('beta_param', 1.0),
+                params.get('mu', 0.0),
+                params.get('sigma', 0.01),
+                params.get('jump_intensity', 0.1),
+                params.get('jump_mean', 0.0),
+                params.get('jump_std', 0.05),
+                params.get('n_observations', 0),
+                datetime.now(),
+            ))
+            conn.commit()
+
+    def get_probability_model(self, market_id: str) -> Optional[Dict]:
+        """Get probability model parameters for a market."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM probability_models WHERE market_id = ?",
+                (market_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Forecasts (v0.8 - Calibration)
+    # ------------------------------------------------------------------
+
+    def save_forecast(self, market_id: str, forecast_prob: float,
+                      signal_type: str) -> int:
+        """Save a forecast for later calibration scoring. Returns row ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                INSERT INTO forecasts (market_id, forecast_prob, signal_type)
+                VALUES (?, ?, ?)
+            """, (market_id, forecast_prob, signal_type))
+            conn.commit()
+            return cursor.lastrowid
+
+    def resolve_forecast(self, forecast_id: int, actual_outcome: float):
+        """Resolve a forecast with actual outcome and compute Brier score."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT forecast_prob FROM forecasts WHERE id = ?",
+                (forecast_id,)
+            ).fetchone()
+            if row:
+                brier = (row[0] - actual_outcome) ** 2
+                conn.execute("""
+                    UPDATE forecasts
+                    SET actual_outcome = ?, brier_score = ?, resolved_at = ?
+                    WHERE id = ?
+                """, (actual_outcome, brier, datetime.now(), forecast_id))
+                conn.commit()
+
+    def get_unresolved_forecasts(self, market_id: Optional[str] = None) -> List[Dict]:
+        """Get all unresolved forecasts, optionally filtered by market."""
+        query = "SELECT * FROM forecasts WHERE resolved_at IS NULL"
+        params = []
+        if market_id:
+            query += " AND market_id = ?"
+            params.append(market_id)
+        query += " ORDER BY created_at DESC"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_resolved_forecasts(self, days: int = 30,
+                                signal_type: Optional[str] = None) -> List[Dict]:
+        """Get resolved forecasts for calibration analysis."""
+        query = """
+            SELECT * FROM forecasts
+            WHERE resolved_at IS NOT NULL
+            AND created_at > datetime('now', ?)
+        """
+        params: list = [f'-{days} days']
+        if signal_type:
+            query += " AND signal_type = ?"
+            params.append(signal_type)
+        query += " ORDER BY created_at DESC"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Risk Snapshots (v0.8)
+    # ------------------------------------------------------------------
+
+    def save_risk_snapshot(self, snapshot: Dict):
+        """Save a portfolio risk snapshot."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO risk_snapshots
+                (timestamp, portfolio_var_95, portfolio_var_99,
+                 expected_shortfall_95, expected_shortfall_99,
+                 gpd_shape, gpd_scale, n_positions, total_exposure,
+                 stress_test_results)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now(),
+                snapshot.get('portfolio_var_95', 0),
+                snapshot.get('portfolio_var_99', 0),
+                snapshot.get('expected_shortfall_95', 0),
+                snapshot.get('expected_shortfall_99', 0),
+                snapshot.get('gpd_shape', 0),
+                snapshot.get('gpd_scale', 0),
+                snapshot.get('n_positions', 0),
+                snapshot.get('total_exposure', 0),
+                json.dumps(snapshot.get('stress_test_results', {})),
+            ))
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Correlation Pairs (v0.8)
+    # ------------------------------------------------------------------
+
+    def save_correlation(self, pair: Dict):
+        """Save a correlation pair result."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO correlation_pairs
+                (market_id_a, market_id_b, timestamp, spearman_rho,
+                 p_value, rolling_corr_7d, n_observations)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pair['market_id_a'],
+                pair['market_id_b'],
+                datetime.now(),
+                pair.get('spearman_rho', 0),
+                pair.get('p_value', 1.0),
+                pair.get('rolling_corr_7d', 0),
+                pair.get('n_observations', 0),
+            ))
+            conn.commit()
+
+    def get_correlations(self, market_id: str,
+                         min_abs_corr: float = 0.3) -> List[Dict]:
+        """Get statistically significant correlations for a market."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT * FROM correlation_pairs
+                WHERE (market_id_a = ? OR market_id_b = ?)
+                AND ABS(spearman_rho) >= ?
+                ORDER BY ABS(spearman_rho) DESC
+            """, (market_id, market_id, min_abs_corr)).fetchall()
+            return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Returns Series (v0.8 - for EVT and Correlation)
+    # ------------------------------------------------------------------
+
+    def get_returns_series(self, market_id: str, hours: int = 720) -> pd.DataFrame:
+        """Get price returns series for a market."""
+        with sqlite3.connect(self.db_path) as conn:
+            df = pd.read_sql_query("""
+                SELECT timestamp, yes_price FROM prices
+                WHERE market_id = ?
+                AND timestamp > datetime('now', ?)
+                ORDER BY timestamp ASC
+            """, conn, params=(market_id, f'-{hours} hours'))
+            if len(df) > 1:
+                df['returns'] = df['yes_price'].pct_change()
+                df = df.dropna(subset=['returns'])
+            return df
+
+    def get_signal_outcomes(self, days: int = 30) -> List[Dict]:
+        """Get signals paired with their outcomes for calibration."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT s.id, s.market_id, s.signal_type, s.severity,
+                       s.expected_return, s.new_price, s.timestamp,
+                       se.direction, se.magnitude
+                FROM signals s
+                LEFT JOIN spike_events se ON s.market_id = se.market_id
+                    AND se.timestamp > s.timestamp
+                    AND se.timestamp <= datetime(s.timestamp, '+24 hours')
+                WHERE s.timestamp > datetime('now', ?)
+                ORDER BY s.timestamp DESC
+            """, (f'-{days} days',)).fetchall()
+            return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Queries (unchanged interface)

@@ -95,6 +95,10 @@ class TrackRecord:
     # Recent notable events
     notable_events: List[Dict] = field(default_factory=list)
 
+    # Calibration (v0.8 — Brier score integration)
+    brier_score: Optional[float] = None
+    calibration_curve: Optional[Dict] = None
+
     # Metadata
     computed_at: Optional[datetime] = None
 
@@ -616,6 +620,24 @@ def format_track_record(record: TrackRecord) -> str:
                 f"({evt.get('score', 0):.0%} score, "
                 f"{evt.get('layers', 0)} layers){lead_str}"
             )
+
+    # Calibration section (v0.8)
+    if record.brier_score is not None:
+        lines.append("")
+        lines.append("Calibration:")
+        lines.append(f"  Brier score: {record.brier_score:.4f} (0=perfect, 1=worst)")
+        if record.calibration_curve:
+            bins = record.calibration_curve.get('bins', [])
+            non_empty = [b for b in bins if b.get('count', 0) > 0]
+            if non_empty:
+                lines.append("  Calibration bins (predicted vs observed):")
+                for b in non_empty[:5]:
+                    lines.append(
+                        f"    {b['bin_lower']:.0%}-{b['bin_upper']:.0%}: "
+                        f"predicted={b['predicted_mean']:.0%} "
+                        f"observed={b['observed_freq']:.0%} "
+                        f"(n={b['count']})"
+                    )
 
     return "\n".join(lines)
 

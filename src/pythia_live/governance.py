@@ -378,3 +378,23 @@ def get_governance() -> tuple[GovernanceConfig, CircuitBreaker, GovernanceValida
     if not _governance_config:
         raise RuntimeError("Governance not initialized. Call init_governance() first.")
     return _governance_config, _circuit_breaker, _validator, _audit_exporter
+
+
+def check_evt_circuit_breaker(expected_shortfall_99: float,
+                               threshold: float = 0.15) -> bool:
+    """
+    EVT-based circuit breaker: triggers when Expected Shortfall
+    at 99% confidence exceeds the emergency threshold.
+
+    Returns True if the circuit breaker is tripped (system should halt).
+    """
+    if _circuit_breaker is None:
+        return False
+
+    if expected_shortfall_99 > threshold:
+        _circuit_breaker.trip(
+            f"EVT Expected Shortfall ({expected_shortfall_99:.2%}) "
+            f"exceeds emergency threshold ({threshold:.2%})"
+        )
+        return True
+    return False

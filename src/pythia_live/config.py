@@ -33,3 +33,23 @@ class Config:
     
     # Signal cooldown (seconds)
     SIGNAL_COOLDOWN = 300  # 5 minutes
+
+    # Probability Engine
+    PROB_ENGINE_WINDOW_HOURS = 168  # 7-day fitting window
+
+    # EVT Risk Management
+    EVT_CONFIDENCE_LEVEL = 0.99
+    EVT_LOOKBACK_DAYS = 30
+    EVT_THRESHOLD_PERCENTILE = 0.90
+    MAX_PORTFOLIO_VAR_PCT = 0.05
+    STRESS_TEST_INTERVAL = 3600
+    EMERGENCY_ES_THRESHOLD = 0.15  # 15% ES triggers governance circuit breaker
+
+    # Calibration
+    CALIBRATION_WINDOW_DAYS = 30
+    CALIBRATION_CHECK_INTERVAL = 100  # polling cycles between checks
+
+    # Cross-Correlation
+    MIN_CORRELATION_HISTORY = 20  # min observations for statistical corr
+    CORRELATION_REFRESH_CYCLES = 50
+    CORRELATION_BREAKDOWN_ZSCORE = 2.0

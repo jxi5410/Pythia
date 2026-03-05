@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from .database import PythiaDB
 from .pattern_integration import PatternLibrary
+from .probability_engine import ProbabilityEngineManager
 
 
 @dataclass
@@ -30,6 +31,7 @@ class Signal:
     why_it_matters: str = ""
     correlated_markets: List[Dict] = field(default_factory=list)
     news_context: List[Dict] = field(default_factory=list)
+    probability_context: Dict = field(default_factory=dict)
 
 
 class SignalDetector:
@@ -49,6 +51,7 @@ class SignalDetector:
         self.config = config
         self.recent_signals = {}  # Cooldown tracking
         self.pattern_library = PatternLibrary()  # Becker-derived patterns
+        self.prob_engine = ProbabilityEngineManager(db)
 
     def detect_all(self, market_data: Dict, price_history: pd.DataFrame,
                    trades: Optional[List[Dict]] = None) -> List[Signal]:
@@ -119,8 +122,8 @@ class SignalDetector:
         """
         Detect significant probability changes.
 
-        A 5%+ move in probability is notable.
-        A 10%+ move is critical.
+        Uses the probability engine's anomaly detection when sufficient data
+        exists; falls back to fixed thresholds otherwise.
         """
         if price_history.empty or len(price_history) < 2:
             return None
@@ -132,21 +135,60 @@ class SignalDetector:
                                      (datetime.now() - timedelta(hours=1)).isoformat()]
 
         if one_hour_ago.empty:
-            # Use earliest available
             old_price = price_history.iloc[-1]['yes_price']
         else:
             old_price = one_hour_ago.iloc[0]['yes_price']
 
         price_change = abs(current_price - old_price)
 
-        if price_change >= 0.10:  # 10%+
-            severity = "CRITICAL"
-        elif price_change >= 0.05:  # 5%+
-            severity = "HIGH"
-        elif price_change >= 0.03:  # 3%+
-            severity = "MEDIUM"
+        # Try probability engine anomaly detection
+        prob_context = {}
+        prices_array = price_history['yes_price'].values
+        anomaly = self.prob_engine.evaluate_signal(market_data, prices_array)
+
+        if anomaly is not None:
+            prob_context = {
+                'anomaly_score': anomaly.anomaly_score,
+                'fitted_mean': anomaly.fitted_mean,
+                'credible_interval': list(anomaly.credible_interval),
+                'z_score_equivalent': anomaly.z_score_equivalent,
+                'is_anomalous': anomaly.is_anomalous,
+            }
+
+            # Use anomaly score for severity when sufficient data
+            if len(prices_array) >= 10:
+                score = anomaly.anomaly_score
+                if score > 0.99 or score < 0.01:
+                    severity = "CRITICAL"
+                elif score > 0.95 or score < 0.05:
+                    severity = "HIGH"
+                elif score > 0.90 or score < 0.10:
+                    severity = "MEDIUM"
+                else:
+                    # Not anomalous enough — check fixed thresholds as fallback
+                    if price_change < 0.03:
+                        return None
+                    severity = "MEDIUM"
+            else:
+                # Insufficient data for anomaly detection — use fixed thresholds
+                if price_change >= 0.10:
+                    severity = "CRITICAL"
+                elif price_change >= 0.05:
+                    severity = "HIGH"
+                elif price_change >= 0.03:
+                    severity = "MEDIUM"
+                else:
+                    return None
         else:
-            return None
+            # Fallback to fixed thresholds
+            if price_change >= 0.10:
+                severity = "CRITICAL"
+            elif price_change >= 0.05:
+                severity = "HIGH"
+            elif price_change >= 0.03:
+                severity = "MEDIUM"
+            else:
+                return None
 
         direction = "UP" if current_price > old_price else "DOWN"
 
@@ -160,12 +202,13 @@ class SignalDetector:
                        f"{market_data.get('title', 'Unknown')[:80]}",
             old_price=old_price,
             new_price=current_price,
-            expected_return=price_change * 0.5,  # Conservative estimate
+            expected_return=price_change * 0.5,
             metadata={
                 'change_pct': price_change,
                 'timeframe': '1h',
                 'direction': 'up' if current_price > old_price else 'down'
-            }
+            },
+            probability_context=prob_context,
         )
 
     def _detect_volume_anomaly(self, market_data: Dict,

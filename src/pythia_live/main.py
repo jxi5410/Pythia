@@ -23,9 +23,14 @@ from .spike_archive import detect_spike, attribute_spike, save_spike, SpikeEvent
 from .patterns import build_patterns, find_matching_pattern, format_pattern_insight
 
 # Governance layer — mandatory for compliance (Singapore IMDA + UC Berkeley)
-from .governance import init_governance, GovernanceConfig, get_governance
+from .governance import init_governance, GovernanceConfig, get_governance, check_evt_circuit_breaker
 from .causal_v2 import attribute_spike_with_governance
 GOVERNANCE_ENABLED = True
+
+# Quant simulation layer (v0.8)
+from .calibration import CalibrationTracker
+from .risk_engine import EVTRiskModel, PositionSizer, compute_portfolio_risk
+from .cross_correlation import CrossCorrelationEngine
 
 # Import connectors
 try:
@@ -122,6 +127,13 @@ class PythiaLive:
         self._patterns = []  # Causal pattern cache
         self._patterns_last_built = None
         
+        # Quant simulation engines (v0.8)
+        self.calibration_tracker = CalibrationTracker(self.db)
+        self.evt_model = EVTRiskModel()
+        self.position_sizer = PositionSizer(self.evt_model)
+        self.correlation_engine = CrossCorrelationEngine(self.db)
+        logger.info("Quant simulation engines initialized (calibration, EVT, correlation)")
+
         # Initialize governance layer
         # Governance is mandatory — system will not start without it
         audit_dir = Path(self.config.DB_PATH).parent / "audit_trails"
@@ -363,7 +375,10 @@ class PythiaLive:
                 else:
                     logger.debug("No significant signals")
 
-                # 5. Sleep until next cycle
+                # 5. Periodic quant checks
+                self._run_quant_checks(markets)
+
+                # 6. Sleep until next cycle
                 elapsed = time.time() - cycle_start
                 sleep_time = max(0, self.config.POLL_INTERVAL - elapsed)
 
@@ -607,6 +622,52 @@ class PythiaLive:
             logger.error("Error processing %s: %s", market_id, e)
             return []
 
+    def _run_quant_checks(self, markets: List[Dict]):
+        """Periodic quant simulation checks: calibration, risk, correlation."""
+        try:
+            # Calibration check (every CALIBRATION_CHECK_INTERVAL cycles)
+            if self.cycle_count % self.config.CALIBRATION_CHECK_INTERVAL == 0:
+                report = self.calibration_tracker.get_calibration_report(
+                    days=self.config.CALIBRATION_WINDOW_DAYS
+                )
+                if report.brier.sample_size > 0:
+                    logger.info(
+                        "Calibration: Brier=%.4f (n=%d)",
+                        report.brier.brier_score, report.brier.sample_size,
+                    )
+                if report.drift_alert:
+                    logger.warning(
+                        "Calibration DRIFT: %s (magnitude=%.4f)",
+                        report.drift_alert.alert_type,
+                        report.drift_alert.magnitude,
+                    )
+
+            # Correlation refresh (every CORRELATION_REFRESH_CYCLES cycles)
+            if self.cycle_count % self.config.CORRELATION_REFRESH_CYCLES == 0:
+                market_ids = [m['id'] for m in markets[:20]]
+                if len(market_ids) >= 2:
+                    corr_matrix = self.correlation_engine.compute_correlation_matrix(
+                        market_ids, hours=168,
+                    )
+                    if corr_matrix:
+                        logger.info(
+                            "Correlation matrix updated: %d markets",
+                            len(corr_matrix.market_ids),
+                        )
+
+            # Risk snapshot (every 50 cycles)
+            if self.cycle_count % 50 == 0:
+                try:
+                    self.db.save_risk_snapshot({
+                        'n_positions': 0,
+                        'total_exposure': 0,
+                    })
+                except Exception as e:
+                    logger.debug("Risk snapshot skipped: %s", e)
+
+        except Exception as e:
+            logger.warning("Quant check failed: %s", e)
+
     def _handle_signals(self, signals: List[Signal]):
         """Process detected signals: save, alert, log."""
         critical_count = 0
@@ -623,6 +684,12 @@ class PythiaLive:
                 new_price=signal.new_price,
                 expected_return=signal.expected_return
             )
+
+            # Record forecast for calibration
+            if signal.new_price is not None:
+                self.calibration_tracker.record_forecast(
+                    signal.market_id, signal.new_price, signal.signal_type,
+                )
 
             # Count by severity
             if signal.severity == "CRITICAL":

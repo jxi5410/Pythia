@@ -445,10 +445,12 @@ class ConfluenceScorer:
         events = scorer.check_confluence()
     """
 
-    def __init__(self, time_window_hours: int = 4, min_layers: int = 3):
+    def __init__(self, time_window_hours: int = 4, min_layers: int = 3,
+                 correlation_clusters: Optional[Dict[str, List[str]]] = None):
         self.time_window = timedelta(hours=time_window_hours)
         self.min_layers = min_layers
         self._signals: List[Signal] = []
+        self.correlation_clusters = correlation_clusters or {}
 
     # -------------------------------------------------------------- #
     # Public API
@@ -546,10 +548,29 @@ class ConfluenceScorer:
                 alert_text="No signals to score.",
             )
 
-        layer_count = len(set(s.layer for s in signals))
+        raw_layer_count = len(set(s.layer for s in signals))
         category = signals[0].event_category
         direction = signals[0].direction
         layers = list(set(s.layer for s in signals))
+
+        # Correlation-based discount: if correlated layers agree,
+        # they are not truly independent — reduce effective count.
+        layer_count = raw_layer_count
+        if self.correlation_clusters:
+            effective = 0.0
+            counted = set()
+            for layer_name in layers:
+                if layer_name in counted:
+                    continue
+                cluster = self.correlation_clusters.get(layer_name, [])
+                cluster_in_layers = [l for l in cluster if l in layers and l not in counted]
+                cluster_size = 1 + len(cluster_in_layers)
+                effective += 1.0 / cluster_size
+                counted.add(layer_name)
+                counted.update(cluster_in_layers)
+            # Only apply discount if it reduces count
+            if effective < raw_layer_count:
+                layer_count = max(1, int(round(effective)))
 
         # --- Base score by layer count ---
         if layer_count >= 5:

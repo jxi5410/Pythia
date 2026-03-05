@@ -41,15 +41,18 @@ class PaperTrade:
 class PaperTrading:
     """
     Paper trading system for Pythia Live.
-    
+
     Automatically creates trades from HIGH/CRITICAL signals
     and tracks P&L without real execution.
     """
-    
-    def __init__(self, db_path: str, initial_capital: float = 10000.0):
+
+    def __init__(self, db_path: str, initial_capital: float = 10000.0,
+                 position_sizer=None, calibration_tracker=None):
         self.db_path = db_path
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
+        self.position_sizer = position_sizer
+        self.calibration_tracker = calibration_tracker
         self._init_db()
     
     def _init_db(self):
@@ -103,10 +106,16 @@ class PaperTrading:
         if not self._can_open_position(signal['expected_return']):
             return None
         
-        # Calculate position size (Kelly Criterion inspired)
-        edge = signal.get('expected_return', 0.02)
-        kelly_fraction = min(edge * 0.5, 0.25)  # Half Kelly, max 25%
-        position_size = self.current_capital * kelly_fraction
+        # Calculate position size — use EVT-aware sizer if available
+        if self.position_sizer:
+            exposure = self._get_current_exposure()
+            position_size = self.position_sizer.size_position(
+                signal, self.current_capital, exposure,
+            )
+        else:
+            edge = signal.get('expected_return', 0.02)
+            kelly_fraction = min(edge * 0.5, 0.25)  # Half Kelly, max 25%
+            position_size = self.current_capital * kelly_fraction
         
         # Determine side from signal
         side = 'yes'  # Default
@@ -231,7 +240,14 @@ class PaperTrading:
             
             # Update capital
             self.current_capital += actual_pnl
-            
+
+            # Record outcome for calibration
+            if self.calibration_tracker:
+                market_id = trade[2]  # market_id column
+                self.calibration_tracker.record_outcome(
+                    market_id, float(actual_outcome)
+                )
+
             return actual_pnl
     
     def get_portfolio_summary(self) -> Dict:

@@ -30,13 +30,41 @@ def find_correlated_markets(
     market_id: str,
     market_title: str,
     limit: int = 5,
+    use_statistical: bool = True,
 ) -> List[Dict]:
     """
     Find markets related to the signal market.
 
-    Uses keyword overlap from market titles + same category.
+    When use_statistical=True, tries Spearman correlation first;
+    falls back to keyword overlap when insufficient price history.
     Returns list of {title, yes_price, price_change_1h, relevance_score}.
     """
+    # Try statistical correlation first
+    if use_statistical:
+        try:
+            from .cross_correlation import CrossCorrelationEngine
+            engine = CrossCorrelationEngine(db)
+            pairs = engine.find_statistically_correlated(
+                market_id, min_correlation=0.3, max_pvalue=0.05,
+            )
+            if pairs:
+                results = []
+                for pair in pairs[:limit]:
+                    other_id = pair.market_id_b if pair.market_id_a == market_id else pair.market_id_a
+                    market = db.get_market(other_id)
+                    if market:
+                        results.append({
+                            "title": market.get("title", ""),
+                            "yes_price": 0.0,
+                            "price_change_1h": None,
+                            "relevance_score": round(abs(pair.spearman_rho), 3),
+                            "correlation_type": "statistical",
+                            "spearman_rho": round(pair.spearman_rho, 3),
+                        })
+                return results
+        except Exception:
+            pass  # Fall through to keyword matching
+
     keywords = _extract_keywords(market_title)
     if not keywords:
         return []
