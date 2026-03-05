@@ -35,6 +35,23 @@ export interface SignalDetail extends Signal {
   }[];
 }
 
+export interface TrackRecordSummary {
+  hitRate: number;
+  avgReturn: string;
+  sharpeRatio: number;
+  totalSignals: number;
+  resolved: number;
+  wins: number;
+  losses: number;
+  recentResults: {
+    date: string;
+    event: string;
+    predicted: string;
+    actual: string;
+    hit: boolean;
+  }[];
+}
+
 export interface Market {
   id: string;
   question: string;
@@ -49,6 +66,8 @@ export interface Market {
   sourceUrl: string;
   trending: boolean;
   tags: string[];
+  probabilityHistory: number[];
+  signal?: Signal & { trackRecord?: TrackRecordSummary };
 }
 
 export interface MarketCategory {
