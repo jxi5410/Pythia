@@ -15,6 +15,8 @@ export interface Signal {
   edgeWindow: string;
   layersFired: string[];
   severity: 'critical' | 'high' | 'medium' | 'low';
+  source: 'polymarket' | 'kalshi';
+  sourceUrl: string;
 }
 
 export interface SignalDetail extends Signal {
@@ -44,6 +46,7 @@ export interface Market {
   liquidity: number;
   endDate: string;
   source: 'polymarket' | 'kalshi';
+  sourceUrl: string;
   trending: boolean;
   tags: string[];
 }

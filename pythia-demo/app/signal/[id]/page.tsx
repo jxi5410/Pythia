@@ -36,10 +36,10 @@ const assetHelp: Record<string, string> = {
 };
 
 const severityExplanations: Record<string, string> = {
-  'critical': '4+ layers converged · Highest confidence · Immediate attention',
-  'high': '3 layers converged · Strong signal · Act within hours',
-  'medium': '2 layers converged · Moderate confidence · Monitor closely',
-  'low': '1 layer · Early indicator · Watch for confirmation',
+  'critical': '4+ layers converged - Highest confidence - Immediate attention',
+  'high': '3 layers converged - Strong signal - Act within hours',
+  'medium': '2 layers converged - Moderate confidence - Monitor closely',
+  'low': '1 layer - Early indicator - Watch for confirmation',
 };
 
 export default function SignalDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -90,7 +90,6 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
           borderRadius: '50%',
           animation: 'spin 0.8s linear infinite',
         }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -108,6 +107,8 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
     );
   }
 
+  const sourceLabel = signal.source === 'polymarket' ? 'Polymarket' : 'Kalshi';
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
       {/* Header */}
@@ -115,12 +116,12 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        background: 'rgba(9, 9, 11, 0.92)',
-        backdropFilter: 'blur(16px)',
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border-subtle)',
       }}>
         <div style={{
-          maxWidth: 680,
+          maxWidth: 900,
           margin: '0 auto',
           padding: '14px 20px',
           display: 'flex',
@@ -142,32 +143,47 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
             </svg>
             Back
           </Link>
-          <button
-            onClick={handleShare}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '7px 16px',
-              background: 'var(--accent-muted)',
-              border: '1px solid rgba(99, 91, 255, 0.15)',
-              borderRadius: 100,
-              color: 'var(--accent-text)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-            </svg>
-            Share
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <a
+              href={signal.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`source-badge source-badge-${signal.source}`}
+            >
+              View on {sourceLabel}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </a>
+            <button
+              onClick={handleShare}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-secondary)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              Share
+            </button>
+          </div>
         </div>
       </header>
 
-      <div style={{ maxWidth: 680, margin: '0 auto', padding: '24px 20px 80px' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 20px 80px' }}>
         {/* Title section */}
         <div style={{ marginBottom: 28 }}>
           <span className={`severity-badge severity-badge-${signal.severity}`} style={{
@@ -258,7 +274,6 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
                   borderRadius: '50%',
                   background: 'var(--positive)',
                   flexShrink: 0,
-                  boxShadow: '0 0 6px rgba(16, 185, 129, 0.3)',
                 }} />
                 {layer.url ? (
                   <a
@@ -373,7 +388,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
               {signal.historicalPrecedent.slice(0, 3).map((event, idx) => (
                 <div key={idx} style={{
                   padding: '12px 14px',
-                  background: 'rgba(255,255,255,0.02)',
+                  background: 'var(--bg-primary)',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border-subtle)',
                 }}>
@@ -405,7 +420,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
         <div style={{
           padding: 18,
           background: 'var(--warning-muted)',
-          border: '1px solid rgba(245, 158, 11, 0.15)',
+          border: '1px solid rgba(217, 119, 6, 0.15)',
           borderRadius: 'var(--radius-lg)',
         }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
@@ -413,7 +428,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
               width: 32,
               height: 32,
               borderRadius: 8,
-              background: 'rgba(245, 158, 11, 0.12)',
+              background: 'rgba(217, 119, 6, 0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

@@ -18,7 +18,9 @@ const mockSignals = [
     ],
     edgeWindow: '18hrs',
     layersFired: ['Polymarket', 'Congressional', 'Twitter'],
-    severity: 'high' as const
+    severity: 'high' as const,
+    source: 'polymarket' as const,
+    sourceUrl: 'https://polymarket.com/event/fed-rate-decision-march-2026',
   },
   {
     id: '2',
@@ -35,7 +37,9 @@ const mockSignals = [
     ],
     edgeWindow: '6hrs',
     layersFired: ['Polymarket', 'Crypto On-chain'],
-    severity: 'medium' as const
+    severity: 'medium' as const,
+    source: 'kalshi' as const,
+    sourceUrl: 'https://kalshi.com/markets/btc/bitcoin-100k',
   },
   {
     id: '3',
@@ -53,7 +57,9 @@ const mockSignals = [
     ],
     edgeWindow: '24hrs',
     layersFired: ['Polymarket', 'Twitter', 'China Signals', 'Equities'],
-    severity: 'critical' as const
+    severity: 'critical' as const,
+    source: 'polymarket' as const,
+    sourceUrl: 'https://polymarket.com/event/china-tariff-escalation',
   }
 ];
 

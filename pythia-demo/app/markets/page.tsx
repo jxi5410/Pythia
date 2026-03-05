@@ -17,10 +17,6 @@ function formatCurrency(value: number): string {
   return `$${value}`;
 }
 
-function formatPct(value: number): string {
-  return `${(value * 100).toFixed(0)}%`;
-}
-
 function ProbabilityChange({ current, previous }: { current: number; previous: number }) {
   const change = current - previous;
   const changeStr = change >= 0 ? `+${(change * 100).toFixed(1)}` : `${(change * 100).toFixed(1)}`;
@@ -40,7 +36,7 @@ function ProbabilityBar({ probability }: { probability: number }) {
       <div style={{
         flex: 1,
         height: 6,
-        background: 'rgba(255,255,255,0.06)',
+        background: 'var(--bg-surface)',
         borderRadius: 100,
         overflow: 'hidden',
       }}>
@@ -71,6 +67,7 @@ function MarketCard({ market }: { market: Market }) {
   const daysLeft = Math.ceil(
     (new Date(market.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
   );
+  const sourceLabel = market.source === 'polymarket' ? 'Polymarket' : 'Kalshi';
 
   return (
     <div style={{
@@ -78,22 +75,20 @@ function MarketCard({ market }: { market: Market }) {
       border: '1px solid var(--border-subtle)',
       borderRadius: 'var(--radius-lg)',
       padding: '18px 20px',
-      transition: 'all 0.25s ease',
-      cursor: 'pointer',
+      transition: 'all 0.2s ease',
       position: 'relative',
       overflow: 'hidden',
+      boxShadow: 'var(--shadow-card)',
     }}
     onMouseEnter={(e) => {
       e.currentTarget.style.borderColor = 'var(--border-default)';
-      e.currentTarget.style.background = 'var(--bg-hover)';
-      e.currentTarget.style.transform = 'translateY(-1px)';
       e.currentTarget.style.boxShadow = 'var(--shadow-md)';
+      e.currentTarget.style.transform = 'translateY(-1px)';
     }}
     onMouseLeave={(e) => {
       e.currentTarget.style.borderColor = 'var(--border-subtle)';
-      e.currentTarget.style.background = 'var(--bg-card)';
+      e.currentTarget.style.boxShadow = 'var(--shadow-card)';
       e.currentTarget.style.transform = 'translateY(0)';
-      e.currentTarget.style.boxShadow = 'none';
     }}
     >
       {/* Trending indicator */}
@@ -141,13 +136,10 @@ function MarketCard({ market }: { market: Market }) {
         gap: 8,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* 24h change */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>24h</span>
             <ProbabilityChange current={market.probability} previous={market.previousProbability} />
           </div>
-
-          {/* Volume */}
           <span style={{
             fontSize: 'var(--text-xs)',
             fontFamily: 'var(--font-mono)',
@@ -155,8 +147,6 @@ function MarketCard({ market }: { market: Market }) {
           }}>
             Vol {formatCurrency(market.volume24h)}
           </span>
-
-          {/* Liquidity */}
           <span style={{
             fontSize: 'var(--text-xs)',
             fontFamily: 'var(--font-mono)',
@@ -167,22 +157,21 @@ function MarketCard({ market }: { market: Market }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Source badge */}
-          <span style={{
-            fontSize: '10px',
-            fontWeight: 600,
-            padding: '2px 8px',
-            borderRadius: 100,
-            background: market.source === 'polymarket' ? 'rgba(99, 91, 255, 0.10)' : 'rgba(59, 130, 246, 0.10)',
-            color: market.source === 'polymarket' ? 'var(--accent-text)' : 'var(--info)',
-            border: `1px solid ${market.source === 'polymarket' ? 'rgba(99, 91, 255, 0.15)' : 'rgba(59, 130, 246, 0.15)'}`,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}>
-            {market.source}
-          </span>
+          {/* Source link */}
+          <a
+            href={market.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`source-badge source-badge-${market.source}`}
+          >
+            {sourceLabel}
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </a>
 
-          {/* Days left */}
           <span style={{
             fontSize: 'var(--text-xs)',
             fontFamily: 'var(--font-mono)',
@@ -213,7 +202,7 @@ function StatCard({ label, value, subtitle }: { label: string; value: string; su
       border: '1px solid var(--border-subtle)',
       borderRadius: 'var(--radius-lg)',
       padding: '16px 18px',
-      boxShadow: 'var(--shadow-sm)',
+      boxShadow: 'var(--shadow-card)',
     }}>
       <div style={{
         fontSize: 'var(--text-xs)',
@@ -298,13 +287,12 @@ export default function MarketsPage() {
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        background: 'rgba(9, 9, 11, 0.92)',
-        backdropFilter: 'blur(16px)',
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border-subtle)',
       }}>
-        <div style={{ maxWidth: 960, margin: '0 auto', padding: '18px 20px 14px' }}>
-          {/* Brand row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{ maxWidth: 960, margin: '0 auto', padding: '16px 20px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Link href="/" style={{ textDecoration: 'none' }}>
@@ -330,8 +318,7 @@ export default function MarketsPage() {
               <p style={{
                 fontSize: 'var(--text-xs)',
                 color: 'var(--text-muted)',
-                marginTop: 6,
-                letterSpacing: '0.01em',
+                marginTop: 4,
               }}>
                 Live prediction market overview
               </p>
@@ -341,8 +328,8 @@ export default function MarketsPage() {
                 fontSize: 'var(--text-xs)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-default)',
-                padding: '6px 14px',
-                borderRadius: 100,
+                padding: '6px 16px',
+                borderRadius: 'var(--radius-sm)',
                 textDecoration: 'none',
                 fontWeight: 500,
                 transition: 'all 0.2s ease',
@@ -353,37 +340,36 @@ export default function MarketsPage() {
                 fontSize: 'var(--text-xs)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-default)',
-                padding: '6px 14px',
-                borderRadius: 100,
+                padding: '6px 16px',
+                borderRadius: 'var(--radius-sm)',
                 textDecoration: 'none',
                 fontWeight: 500,
                 transition: 'all 0.2s ease',
               }}>
                 Track Record
               </Link>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: 'var(--positive)',
-                    boxShadow: '0 0 8px var(--positive)',
-                    animation: 'pulse-soft 2s ease-in-out infinite',
-                  }} />
-                  <span style={{
-                    fontSize: 'var(--text-xs)',
-                    fontFamily: 'var(--font-mono)',
-                    color: 'var(--positive)',
-                    fontWeight: 500,
-                  }}>LIVE</span>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--positive)',
+                  boxShadow: '0 0 6px var(--positive)',
+                  animation: 'pulse-soft 2s ease-in-out infinite',
+                }} />
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--positive)',
+                  fontWeight: 600,
+                }}>LIVE</span>
                 <span style={{
                   fontSize: '10px',
                   fontFamily: 'var(--font-mono)',
                   color: 'var(--text-muted)',
+                  marginLeft: 4,
                 }}>
-                  {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             </div>
@@ -392,7 +378,7 @@ export default function MarketsPage() {
           {/* Category filters */}
           <div className="scrollbar-hide" style={{
             display: 'flex',
-            gap: 8,
+            gap: 6,
             overflowX: 'auto',
             paddingBottom: 2,
           }}>
@@ -401,8 +387,8 @@ export default function MarketsPage() {
                 key={cat.id}
                 onClick={() => setCategory(cat.id)}
                 style={{
-                  padding: '7px 16px',
-                  borderRadius: 100,
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius-sm)',
                   fontSize: 'var(--text-sm)',
                   fontWeight: 500,
                   whiteSpace: 'nowrap',
@@ -411,12 +397,12 @@ export default function MarketsPage() {
                     : '1px solid var(--border-subtle)',
                   background: category === cat.id
                     ? 'var(--accent-muted)'
-                    : 'transparent',
+                    : 'var(--bg-card)',
                   color: category === cat.id
                     ? 'var(--accent-text)'
                     : 'var(--text-secondary)',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 {cat.label}
@@ -510,7 +496,7 @@ export default function MarketsPage() {
                     onClick={() => setSort(opt.id)}
                     style={{
                       padding: '5px 12px',
-                      borderRadius: 100,
+                      borderRadius: 'var(--radius-sm)',
                       fontSize: '10px',
                       fontWeight: 600,
                       whiteSpace: 'nowrap',
@@ -519,12 +505,12 @@ export default function MarketsPage() {
                         : '1px solid var(--border-subtle)',
                       background: sort === opt.id
                         ? 'var(--accent-muted)'
-                        : 'transparent',
+                        : 'var(--bg-card)',
                       color: sort === opt.id
                         ? 'var(--accent-text)'
                         : 'var(--text-muted)',
                       cursor: 'pointer',
-                      transition: 'all 0.2s ease',
+                      transition: 'all 0.15s ease',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
                     }}
@@ -546,7 +532,7 @@ export default function MarketsPage() {
             <div style={{
               marginTop: 28,
               background: 'var(--accent-muted)',
-              border: '1px solid rgba(99, 91, 255, 0.12)',
+              border: '1px solid rgba(26, 86, 219, 0.12)',
               borderRadius: 'var(--radius-lg)',
               padding: '14px 18px',
               display: 'flex',

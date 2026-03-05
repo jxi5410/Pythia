@@ -31,6 +31,8 @@ const mockSignalDetails: Record<string, SignalDetail> = {
       { text: 'Twitter Velocity (2.1x normal volume on #Fed)', url: 'https://x.com/search?q=%23Fed&f=live' },
     ],
     severity: 'high' as const,
+    source: 'polymarket' as const,
+    sourceUrl: 'https://polymarket.com/event/fed-rate-decision-march-2026',
     historicalPrecedent: [
       {
         date: '2025-12-18',
@@ -80,6 +82,8 @@ const mockSignalDetails: Record<string, SignalDetail> = {
       { text: 'Crypto On-chain (Whale accumulation detected)', url: 'https://www.blockchain.com/explorer/assets/btc' },
     ],
     severity: 'medium' as const,
+    source: 'kalshi' as const,
+    sourceUrl: 'https://kalshi.com/markets/btc/bitcoin-100k',
     historicalPrecedent: [
       {
         date: '2026-02-10',
@@ -128,6 +132,8 @@ const mockSignalDetails: Record<string, SignalDetail> = {
       { text: 'Equities Correlation (XLI/FXI negative divergence)', url: 'https://finance.yahoo.com/quote/XLI/' },
     ],
     severity: 'critical' as const,
+    source: 'polymarket' as const,
+    sourceUrl: 'https://polymarket.com/event/china-tariff-escalation',
     historicalPrecedent: [
       {
         date: '2025-08-15',

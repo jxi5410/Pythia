@@ -49,13 +49,13 @@ export default function Home() {
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        background: 'rgba(9, 9, 11, 0.92)',
-        backdropFilter: 'blur(16px)',
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border-subtle)',
       }}>
-        <div style={{ maxWidth: 680, margin: '0 auto', padding: '18px 20px 14px' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', padding: '16px 20px 12px' }}>
           {/* Brand row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <h1 style={{
@@ -76,6 +76,7 @@ export default function Home() {
                   borderRadius: 100,
                   letterSpacing: '0.06em',
                   textTransform: 'uppercase',
+                  border: '1px solid rgba(26, 86, 219, 0.12)',
                 }}>
                   Beta
                 </span>
@@ -83,24 +84,24 @@ export default function Home() {
               <p style={{
                 fontSize: 'var(--text-xs)',
                 color: 'var(--text-muted)',
-                marginTop: 6,
+                marginTop: 4,
                 letterSpacing: '0.01em',
               }}>
                 Real-time prediction market intelligence
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <Link href="/markets" style={{
                 fontSize: 'var(--text-xs)',
-                color: 'var(--accent-text)',
-                background: 'var(--accent-muted)',
-                padding: '6px 14px',
-                borderRadius: 100,
+                color: 'var(--text-inverse)',
+                background: 'var(--accent)',
+                padding: '7px 16px',
+                borderRadius: 'var(--radius-sm)',
                 textDecoration: 'none',
                 fontWeight: 600,
                 letterSpacing: '0.01em',
                 transition: 'all 0.2s ease',
-                border: '1px solid rgba(99, 91, 255, 0.15)',
+                border: 'none',
               }}>
                 Markets
               </Link>
@@ -108,37 +109,36 @@ export default function Home() {
                 fontSize: 'var(--text-xs)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-default)',
-                padding: '6px 14px',
-                borderRadius: 100,
+                padding: '6px 16px',
+                borderRadius: 'var(--radius-sm)',
                 textDecoration: 'none',
                 fontWeight: 500,
                 transition: 'all 0.2s ease',
               }}>
                 Track Record
               </Link>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: 'var(--positive)',
-                    boxShadow: '0 0 8px var(--positive)',
-                    animation: 'pulse-soft 2s ease-in-out infinite',
-                  }} />
-                  <span style={{
-                    fontSize: 'var(--text-xs)',
-                    fontFamily: 'var(--font-mono)',
-                    color: 'var(--positive)',
-                    fontWeight: 500,
-                  }}>LIVE</span>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--positive)',
+                  boxShadow: '0 0 6px var(--positive)',
+                  animation: 'pulse-soft 2s ease-in-out infinite',
+                }} />
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--positive)',
+                  fontWeight: 600,
+                }}>LIVE</span>
                 <span style={{
                   fontSize: '10px',
                   fontFamily: 'var(--font-mono)',
                   color: 'var(--text-muted)',
+                  marginLeft: 4,
                 }}>
-                  {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             </div>
@@ -147,7 +147,7 @@ export default function Home() {
           {/* Category filters */}
           <div className="scrollbar-hide" style={{
             display: 'flex',
-            gap: 8,
+            gap: 6,
             overflowX: 'auto',
             paddingBottom: 2,
           }}>
@@ -156,8 +156,8 @@ export default function Home() {
                 key={cat.id}
                 onClick={() => setFilter(cat.id)}
                 style={{
-                  padding: '7px 16px',
-                  borderRadius: 100,
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius-sm)',
                   fontSize: 'var(--text-sm)',
                   fontWeight: 500,
                   whiteSpace: 'nowrap',
@@ -166,12 +166,12 @@ export default function Home() {
                     : '1px solid var(--border-subtle)',
                   background: filter === cat.id
                     ? 'var(--accent-muted)'
-                    : 'transparent',
+                    : 'var(--bg-card)',
                   color: filter === cat.id
                     ? 'var(--accent-text)'
                     : 'var(--text-secondary)',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 {cat.label}
@@ -182,7 +182,7 @@ export default function Home() {
       </header>
 
       {/* Feed */}
-      <div style={{ maxWidth: 680, margin: '0 auto', padding: '20px 20px 80px' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px 20px 80px' }}>
         {loading ? (
           <div style={{
             display: 'flex',
@@ -201,9 +201,6 @@ export default function Home() {
             }} />
             <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 20 }}>
               Scanning data sources...
-            </p>
-            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginTop: 8, fontFamily: 'var(--font-mono)', opacity: 0.6 }}>
-              Polymarket · News · Twitter · Congressional · On-chain
             </p>
           </div>
         ) : signals.length === 0 ? (
@@ -225,7 +222,7 @@ export default function Home() {
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 20,
-              boxShadow: 'var(--shadow-md)',
+              boxShadow: 'var(--shadow-card)',
             }}>
               <div style={{
                 width: 8,
@@ -247,7 +244,7 @@ export default function Home() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {signals.map((signal) => (
               <SignalCard key={signal.id} signal={signal} />
             ))}

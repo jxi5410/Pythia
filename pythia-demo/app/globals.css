@@ -2,56 +2,58 @@
 
 /* ═══════════════════════════════════════════
    PYTHIA DESIGN SYSTEM
-   Modern Elite Finance
+   Kalshi-inspired clean light theme
    ═══════════════════════════════════════════ */
 
 :root {
-  /* Surface palette — cool near-black with subtle depth */
-  --bg-primary: #09090b;
-  --bg-secondary: #111114;
-  --bg-elevated: #1a1a1f;
-  --bg-card: #131316;
-  --bg-hover: #1c1c22;
-  --bg-surface: #0d0d10;
+  /* Surface palette — clean whites and light grays */
+  --bg-primary: #f7f7f8;
+  --bg-secondary: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f0f2;
+  --bg-surface: #eeeef0;
 
-  /* Border — refined, barely visible */
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.13);
+  /* Border — subtle gray */
+  --border-subtle: #e5e5e8;
+  --border-default: #d4d4d8;
+  --border-strong: #a1a1aa;
 
-  /* Text — crisp hierarchy */
-  --text-primary: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-muted: #63637a;
-  --text-inverse: #09090b;
+  /* Text — dark hierarchy */
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+  --text-inverse: #ffffff;
 
-  /* Accent — refined indigo */
-  --accent: #635bff;
-  --accent-hover: #7c75ff;
-  --accent-muted: rgba(99, 91, 255, 0.10);
-  --accent-text: #818cf8;
+  /* Accent — Kalshi-style blue/teal */
+  --accent: #1a56db;
+  --accent-hover: #1e40af;
+  --accent-muted: rgba(26, 86, 219, 0.08);
+  --accent-text: #1a56db;
 
   /* Semantic */
-  --positive: #10b981;
-  --positive-muted: rgba(16, 185, 129, 0.10);
-  --negative: #f43f5e;
-  --negative-muted: rgba(244, 63, 94, 0.10);
-  --warning: #f59e0b;
-  --warning-muted: rgba(245, 158, 11, 0.10);
-  --info: #3b82f6;
-  --info-muted: rgba(59, 130, 246, 0.10);
+  --positive: #16a34a;
+  --positive-muted: rgba(22, 163, 74, 0.08);
+  --positive-bg: rgba(22, 163, 74, 0.06);
+  --negative: #dc2626;
+  --negative-muted: rgba(220, 38, 38, 0.08);
+  --negative-bg: rgba(220, 38, 38, 0.06);
+  --warning: #d97706;
+  --warning-muted: rgba(217, 119, 6, 0.08);
+  --info: #2563eb;
+  --info-muted: rgba(37, 99, 235, 0.08);
 
   /* Severity */
-  --severity-critical: #f43f5e;
-  --severity-critical-bg: rgba(244, 63, 94, 0.08);
-  --severity-high: #f97316;
-  --severity-high-bg: rgba(249, 115, 22, 0.08);
-  --severity-medium: #eab308;
-  --severity-medium-bg: rgba(234, 179, 8, 0.08);
-  --severity-low: #10b981;
-  --severity-low-bg: rgba(16, 185, 129, 0.08);
+  --severity-critical: #dc2626;
+  --severity-critical-bg: rgba(220, 38, 38, 0.06);
+  --severity-high: #ea580c;
+  --severity-high-bg: rgba(234, 88, 12, 0.06);
+  --severity-medium: #ca8a04;
+  --severity-medium-bg: rgba(202, 138, 4, 0.06);
+  --severity-low: #16a34a;
+  --severity-low-bg: rgba(22, 163, 74, 0.06);
 
-  /* Spacing scale — generous breathing room */
+  /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 14px;
@@ -71,17 +73,17 @@
   --text-xl: 1.25rem;      /* 20px */
   --text-2xl: 1.625rem;    /* 26px */
 
-  /* Radius — modern rounded */
+  /* Radius — Kalshi uses moderate rounding */
   --radius-sm: 8px;
   --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --shadow-glow: 0 0 20px rgba(99, 91, 255, 0.08);
+  /* Shadows — subtle, clean */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 body {
@@ -118,7 +120,7 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Tooltip — refined */
+/* Tooltip — clean */
 .tooltip-wrap {
   position: relative;
 }
@@ -129,9 +131,8 @@ body {
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  color: var(--text-secondary);
+  background: var(--text-primary);
+  color: var(--text-inverse);
   font-size: var(--text-xs);
   line-height: 1.5;
   padding: 8px 12px;
@@ -143,7 +144,7 @@ body {
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
   transform: translateX(-50%) translateY(4px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
 }
 .tooltip-wrap .tooltip-text::after {
   content: '';
@@ -152,7 +153,7 @@ body {
   left: 50%;
   transform: translateX(-50%);
   border: 5px solid transparent;
-  border-top-color: var(--bg-elevated);
+  border-top-color: var(--text-primary);
 }
 .tooltip-wrap:hover .tooltip-text,
 .tooltip-wrap:active .tooltip-text {
@@ -161,7 +162,7 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 
-/* Data label — clean uppercase */
+/* Data label */
 .data-label {
   font-size: var(--text-xs);
   color: var(--text-muted);
@@ -177,30 +178,25 @@ body {
   letter-spacing: -0.02em;
 }
 
-/* Card — refined with subtle depth */
+/* Card — Kalshi style: white bg, subtle border, clean shadow */
 .signal-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  transition: all 0.25s ease;
-  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-card);
   position: relative;
   overflow: hidden;
 }
 .signal-card:hover {
   border-color: var(--border-default);
-  background: var(--bg-hover);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
-.signal-card:active {
-  transform: translateY(0);
-  background: var(--bg-elevated);
-}
 
-/* Metric cell — glass-like */
+/* Metric cell */
 .metric-cell {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--bg-primary);
   border-radius: var(--radius-sm);
   padding: var(--space-md);
   border: 1px solid var(--border-subtle);
@@ -211,7 +207,7 @@ body {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 100px;
   font-size: var(--text-xs);
@@ -220,11 +216,11 @@ body {
   transition: all 0.15s ease;
 }
 .layer-tag:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-hover);
   border-color: var(--border-default);
 }
 
-/* Section card — refined container */
+/* Section card */
 .section-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -233,22 +229,18 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* Severity indicators — refined left accent with glow */
+/* Severity indicators — clean left accent */
 .severity-accent-critical {
   border-left: 3px solid var(--severity-critical);
-  box-shadow: inset 3px 0 12px -4px rgba(244, 63, 94, 0.15);
 }
 .severity-accent-high {
   border-left: 3px solid var(--severity-high);
-  box-shadow: inset 3px 0 12px -4px rgba(249, 115, 22, 0.15);
 }
 .severity-accent-medium {
   border-left: 3px solid var(--severity-medium);
-  box-shadow: inset 3px 0 12px -4px rgba(234, 179, 8, 0.12);
 }
 .severity-accent-low {
   border-left: 3px solid var(--severity-low);
-  box-shadow: inset 3px 0 12px -4px rgba(16, 185, 129, 0.12);
 }
 
 /* Badge — severity pill */
@@ -264,25 +256,25 @@ body {
 .severity-badge-critical {
   background: var(--severity-critical-bg);
   color: var(--severity-critical);
-  border: 1px solid rgba(244, 63, 94, 0.2);
+  border: 1px solid rgba(220, 38, 38, 0.15);
 }
 .severity-badge-high {
   background: var(--severity-high-bg);
   color: var(--severity-high);
-  border: 1px solid rgba(249, 115, 22, 0.2);
+  border: 1px solid rgba(234, 88, 12, 0.15);
 }
 .severity-badge-medium {
   background: var(--severity-medium-bg);
   color: var(--severity-medium);
-  border: 1px solid rgba(234, 179, 8, 0.2);
+  border: 1px solid rgba(202, 138, 4, 0.15);
 }
 .severity-badge-low {
   background: var(--severity-low-bg);
   color: var(--severity-low);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(22, 163, 74, 0.15);
 }
 
-/* Button — modern primary */
+/* Button — Kalshi-style primary */
 .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -300,7 +292,50 @@ body {
 }
 .btn-primary:hover {
   background: var(--accent-hover);
-  box-shadow: 0 4px 16px rgba(99, 91, 255, 0.25);
+  box-shadow: 0 2px 8px rgba(26, 86, 219, 0.2);
+}
+
+/* Source badge */
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.source-badge-polymarket {
+  background: rgba(107, 60, 255, 0.08);
+  color: #6b3cff;
+  border: 1px solid rgba(107, 60, 255, 0.15);
+}
+.source-badge-polymarket:hover {
+  background: rgba(107, 60, 255, 0.14);
+  border-color: rgba(107, 60, 255, 0.3);
+}
+.source-badge-kalshi {
+  background: rgba(26, 86, 219, 0.08);
+  color: #1a56db;
+  border: 1px solid rgba(26, 86, 219, 0.15);
+}
+.source-badge-kalshi:hover {
+  background: rgba(26, 86, 219, 0.14);
+  border-color: rgba(26, 86, 219, 0.3);
+}
+
+/* Signal analysis mini card */
+.signal-analysis-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  min-width: 140px;
+  flex-shrink: 0;
 }
 
 /* Animations */
