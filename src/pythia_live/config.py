@@ -22,10 +22,26 @@ class Config:
     PROBABILITY_SPIKE_THRESHOLD = 0.05  # 5% move
     VOLUME_SPIKE_THRESHOLD = 3.0  # 3x average volume
     ARBITRAGE_THRESHOLD = 0.02  # 2% edge minimum
+    PROB_ENGINE_WINDOW_HOURS = 168  # 7-day fitting window
     
     # Risk limits
     MAX_POSITION_PCT = 0.25  # 25% max position
     MAX_DAILY_LOSS = 0.10  # 10% daily stop
+    EVT_CONFIDENCE_LEVEL = 0.99
+    EVT_LOOKBACK_DAYS = 30
+    EVT_THRESHOLD_PERCENTILE = 0.90
+    MAX_PORTFOLIO_VAR_PCT = 0.05
+    STRESS_TEST_INTERVAL = 3600
+    EMERGENCY_ES_THRESHOLD = 0.15
+
+    # Calibration
+    CALIBRATION_WINDOW_DAYS = 30
+    CALIBRATION_CHECK_INTERVAL = 100
+
+    # Cross-correlation
+    MIN_CORRELATION_HISTORY = 20
+    CORRELATION_REFRESH_CYCLES = 50
+    CORRELATION_BREAKDOWN_ZSCORE = 2.0
     
     # Market filters
     MIN_LIQUIDITY = 10000  # $10k minimum

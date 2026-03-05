@@ -521,7 +521,11 @@ class ConfluenceScorer:
         events.sort(key=lambda e: e.confluence_score, reverse=True)
         return events
 
-    def score(self, signals: List[Signal]) -> ConfluenceEvent:
+    def score(
+        self,
+        signals: List[Signal],
+        correlation_clusters: Optional[List[List[str]]] = None,
+    ) -> ConfluenceEvent:
         """
         Score a group of converging signals.
 
@@ -550,15 +554,25 @@ class ConfluenceScorer:
         category = signals[0].event_category
         direction = signals[0].direction
         layers = list(set(s.layer for s in signals))
+        effective_layers = float(layer_count)
+        if correlation_clusters:
+            effective_layers = 0.0
+            layer_set = set(layers)
+            for cluster in correlation_clusters:
+                cluster_layers = [x for x in cluster if x in layer_set]
+                if cluster_layers:
+                    effective_layers += 1.0 / len(cluster_layers)
+            leftover = layer_set - {x for c in correlation_clusters for x in c}
+            effective_layers += float(len(leftover))
 
         # --- Base score by layer count ---
-        if layer_count >= 5:
+        if effective_layers >= 5:
             base_score = 0.95
-        elif layer_count == 4:
+        elif effective_layers >= 4:
             base_score = 0.85
-        elif layer_count == 3:
+        elif effective_layers >= 3:
             base_score = 0.60
-        elif layer_count == 2:
+        elif effective_layers >= 2:
             base_score = 0.30
         else:
             base_score = 0.10

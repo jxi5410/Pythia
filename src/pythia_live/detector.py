@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 
 from .database import PythiaDB
 from .pattern_integration import PatternLibrary
+from .probability_engine import ProbabilityEngineManager
+from .cross_correlation import CrossCorrelationEngine
 
 
 @dataclass
@@ -30,6 +32,7 @@ class Signal:
     why_it_matters: str = ""
     correlated_markets: List[Dict] = field(default_factory=list)
     news_context: List[Dict] = field(default_factory=list)
+    probability_context: Dict = field(default_factory=dict)
 
 
 class SignalDetector:
@@ -49,6 +52,8 @@ class SignalDetector:
         self.config = config
         self.recent_signals = {}  # Cooldown tracking
         self.pattern_library = PatternLibrary()  # Becker-derived patterns
+        self.prob_engine = ProbabilityEngineManager(db)
+        self.cross_correlation_engine = CrossCorrelationEngine(db)
 
     def detect_all(self, market_data: Dict, price_history: pd.DataFrame,
                    trades: Optional[List[Dict]] = None) -> List[Signal]:
@@ -90,7 +95,12 @@ class SignalDetector:
         if momentum_signal:
             signals.append(momentum_signal)
 
-        # 5. Optimism tax (requires trade data)
+        # 5. Correlation breakdown signal
+        correlation_signal = self._detect_correlation_deviation(market_data)
+        if correlation_signal:
+            signals.append(correlation_signal)
+
+        # 6. Optimism tax (requires trade data)
         if trades:
             tax_signal = self._detect_optimism_tax(market_data, trades)
             if tax_signal:
@@ -126,6 +136,8 @@ class SignalDetector:
             return None
 
         current_price = market_data.get('yes_price', 0.5)
+        eval_ctx = self.prob_engine.evaluate_signal(market_data, price_history)
+        anomaly_score = eval_ctx["anomaly_score"]
 
         # Compare to price 1 hour ago
         one_hour_ago = price_history[price_history['timestamp'] >
@@ -139,11 +151,11 @@ class SignalDetector:
 
         price_change = abs(current_price - old_price)
 
-        if price_change >= 0.10:  # 10%+
+        if anomaly_score > 0.99:
             severity = "CRITICAL"
-        elif price_change >= 0.05:  # 5%+
+        elif anomaly_score > 0.95:
             severity = "HIGH"
-        elif price_change >= 0.03:  # 3%+
+        elif anomaly_score > 0.90:
             severity = "MEDIUM"
         else:
             return None
@@ -165,7 +177,46 @@ class SignalDetector:
                 'change_pct': price_change,
                 'timeframe': '1h',
                 'direction': 'up' if current_price > old_price else 'down'
-            }
+            },
+            probability_context=eval_ctx,
+        )
+
+    def _detect_correlation_deviation(self, market_data: Dict) -> Optional[Signal]:
+        market_id = market_data.get("id")
+        if not market_id:
+            return None
+
+        correlated = self.cross_correlation_engine.find_statistically_correlated(market_id)
+        if not correlated:
+            return None
+        correlated_ids = [row["market_id"] for row in correlated[:5]]
+        breaks = self.cross_correlation_engine.detect_correlation_breaks(market_id, correlated_ids)
+        if not breaks:
+            return None
+
+        top = max(breaks, key=lambda b: b.get("z_score", 0.0))
+        z_score = float(top.get("z_score", 0.0))
+        if z_score >= 3.0:
+            severity = "CRITICAL"
+        elif z_score >= 2.5:
+            severity = "HIGH"
+        else:
+            severity = "MEDIUM"
+
+        return Signal(
+            market_id=market_id,
+            market_title=market_data.get("title", "Unknown"),
+            timestamp=datetime.now(),
+            signal_type="CORRELATION_DEVIATION",
+            severity=severity,
+            description=(
+                f"Correlation regime break vs {top.get('other_market_id')} "
+                f"(z={z_score:.2f})"
+            ),
+            old_price=None,
+            new_price=market_data.get("yes_price"),
+            expected_return=0.01,
+            metadata=top,
         )
 
     def _detect_volume_anomaly(self, market_data: Dict,

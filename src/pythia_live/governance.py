@@ -256,6 +256,19 @@ class CircuitBreaker:
         else:
             logger.error("Circuit breaker reset requires admin_override=True")
 
+    def check_expected_shortfall(self, expected_shortfall_99: float, threshold: float) -> tuple[bool, Optional[str]]:
+        """Trip breaker when ES(99) breaches configured emergency threshold."""
+        if expected_shortfall_99 is None:
+            return True, None
+        if expected_shortfall_99 >= threshold:
+            reason = (
+                f"Expected shortfall 99% {expected_shortfall_99:.3f} "
+                f"exceeded threshold {threshold:.3f}"
+            )
+            self.trip(reason)
+            return False, reason
+        return True, None
+
 
 class GovernanceValidator:
     """Validation checkpoints between agents (Berkeley: defense-in-depth)"""

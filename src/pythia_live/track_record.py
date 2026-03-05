@@ -95,6 +95,10 @@ class TrackRecord:
     # Recent notable events
     notable_events: List[Dict] = field(default_factory=list)
 
+    # Calibration diagnostics
+    brier_score: float = 0.0
+    calibration_curve: Dict = field(default_factory=dict)
+
     # Metadata
     computed_at: Optional[datetime] = None
 
@@ -565,6 +569,7 @@ def format_track_record(record: TrackRecord) -> str:
     lines.append(f"Hits: {record.total_hits} ({record.overall_hit_rate:.0%} hit rate)")
     lines.append(f"Avg lead time: {record.avg_lead_time_hours:.1f}h")
     lines.append(f"Avg confluence score: {record.avg_confluence_score:.2f}")
+    lines.append(f"Brier score: {record.brier_score:.4f}")
     lines.append("")
 
     # Threshold breakdown
@@ -616,6 +621,14 @@ def format_track_record(record: TrackRecord) -> str:
                 f"({evt.get('score', 0):.0%} score, "
                 f"{evt.get('layers', 0)} layers){lead_str}"
             )
+
+    if record.calibration_curve:
+        lines.append("")
+        lines.append("Calibration:")
+        counts = record.calibration_curve.get("counts", [])
+        bins = record.calibration_curve.get("bins", [])
+        if counts and bins:
+            lines.append(f"  bins: {len(bins)} | samples: {sum(counts)}")
 
     return "\n".join(lines)
 

@@ -7,6 +7,7 @@ import sqlite3
 from typing import List, Dict
 
 from .database import PythiaDB
+from .cross_correlation import CrossCorrelationEngine
 
 
 # Words too common to be useful for matching
@@ -30,6 +31,7 @@ def find_correlated_markets(
     market_id: str,
     market_title: str,
     limit: int = 5,
+    use_statistical: bool = True,
 ) -> List[Dict]:
     """
     Find markets related to the signal market.
@@ -37,6 +39,27 @@ def find_correlated_markets(
     Uses keyword overlap from market titles + same category.
     Returns list of {title, yes_price, price_change_1h, relevance_score}.
     """
+    if use_statistical:
+        try:
+            engine = CrossCorrelationEngine(db)
+            statistical = engine.find_statistically_correlated(market_id)
+            if statistical:
+                out = []
+                for row in statistical[:limit]:
+                    market = db.get_market(row["market_id"]) or {}
+                    out.append({
+                        "market_id": row["market_id"],
+                        "title": market.get("title", row["market_id"]),
+                        "yes_price": None,
+                        "price_change_1h": None,
+                        "relevance_score": round(abs(row.get("rho", 0.0)), 3),
+                        "p_value": row.get("p_value"),
+                        "method": "spearman",
+                    })
+                return out
+        except Exception:
+            pass
+
     keywords = _extract_keywords(market_title)
     if not keywords:
         return []

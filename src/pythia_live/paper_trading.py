@@ -10,6 +10,13 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+import numpy as np
+
+from .calibration import CalibrationTracker
+from .config import Config
+from .database import PythiaDB
+from .risk_engine import EVTRiskModel, PositionSizer
+
 
 class TradeStatus(Enum):
     PENDING = "pending"
@@ -48,8 +55,13 @@ class PaperTrading:
     
     def __init__(self, db_path: str, initial_capital: float = 10000.0):
         self.db_path = db_path
+        self.config = Config()
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
+        self.analytics_db = PythiaDB(db_path)
+        self.calibration_tracker = CalibrationTracker(self.analytics_db)
+        self.evt_model = EVTRiskModel(threshold_percentile=self.config.EVT_THRESHOLD_PERCENTILE)
+        self.position_sizer = PositionSizer(self.evt_model, max_position_pct=self.config.MAX_POSITION_PCT)
         self._init_db()
     
     def _init_db(self):
@@ -103,10 +115,15 @@ class PaperTrading:
         if not self._can_open_position(signal['expected_return']):
             return None
         
-        # Calculate position size (Kelly Criterion inspired)
-        edge = signal.get('expected_return', 0.02)
-        kelly_fraction = min(edge * 0.5, 0.25)  # Half Kelly, max 25%
-        position_size = self.current_capital * kelly_fraction
+        # Calculate position size using EVT-aware Kelly replacement
+        exposure = self._get_current_exposure()
+        position_size = self.position_sizer.size_position(
+            signal=signal,
+            capital=self.current_capital,
+            existing_exposure=exposure,
+        )
+        if position_size <= 0:
+            return None
         
         # Determine side from signal
         side = 'yes'  # Default
@@ -156,6 +173,22 @@ class PaperTrading:
         exposure = self._get_current_exposure()
         if exposure > self.current_capital * 0.8:  # Max 80% exposed
             return False
+
+        # EVT portfolio VaR check
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("""
+                SELECT actual_return
+                FROM paper_trades
+                WHERE actual_return IS NOT NULL
+                ORDER BY closed_at DESC
+                LIMIT 500
+            """).fetchall()
+        returns = [float(r[0]) for r in rows if r[0] is not None]
+        if len(returns) >= 20:
+            self.evt_model.fit_tail(returns, threshold_percentile=self.config.EVT_THRESHOLD_PERCENTILE)
+            var99 = self.evt_model.var(self.config.EVT_CONFIDENCE_LEVEL)
+            if np.isfinite(var99) and var99 * self.current_capital > self.config.MAX_PORTFOLIO_VAR_PCT * self.current_capital:
+                return False
         
         return True
     
@@ -231,6 +264,18 @@ class PaperTrading:
             
             # Update capital
             self.current_capital += actual_pnl
+
+            # Resolve calibration outcome if forecast id is present in signal metadata.
+            try:
+                metadata = json.loads(trade[14]) if trade[14] else {}
+            except Exception:
+                metadata = {}
+            forecast_id = metadata.get("forecast_id")
+            self.calibration_tracker.record_outcome(
+                market_id=trade[2],
+                actual_outcome=actual_outcome,
+                forecast_id=forecast_id,
+            )
             
             return actual_pnl
     

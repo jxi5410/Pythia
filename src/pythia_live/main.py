@@ -21,6 +21,9 @@ from .correlations import find_correlated_markets
 from .news_context import get_news_context
 from .spike_archive import detect_spike, attribute_spike, save_spike, SpikeEvent
 from .patterns import build_patterns, find_matching_pattern, format_pattern_insight
+from .calibration import CalibrationTracker
+from .cross_correlation import CrossCorrelationEngine
+from .risk_engine import EVTRiskModel, StressTestEngine
 
 # Governance layer — mandatory for compliance (Singapore IMDA + UC Berkeley)
 from .governance import init_governance, GovernanceConfig, get_governance
@@ -83,6 +86,10 @@ class PythiaLive:
             'SIGNAL_COOLDOWN': self.config.SIGNAL_COOLDOWN,
             'PROBABILITY_SPIKE_THRESHOLD': self.config.PROBABILITY_SPIKE_THRESHOLD
         })
+        self.calibration_tracker = CalibrationTracker(self.db)
+        self.cross_corr_engine = CrossCorrelationEngine(self.db)
+        self.evt_risk_model = EVTRiskModel(threshold_percentile=self.config.EVT_THRESHOLD_PERCENTILE)
+        self.stress_test_engine = StressTestEngine()
         self.alerter = TelegramAlerter(
             self.config.TELEGRAM_BOT_TOKEN,
             self.config.TELEGRAM_CHAT_ID,
@@ -363,7 +370,10 @@ class PythiaLive:
                 else:
                     logger.debug("No significant signals")
 
-                # 5. Sleep until next cycle
+                # 5. Quant engine maintenance
+                self._run_quant_maintenance(markets)
+
+                # 6. Sleep until next cycle
                 elapsed = time.time() - cycle_start
                 sleep_time = max(0, self.config.POLL_INTERVAL - elapsed)
 
@@ -374,6 +384,59 @@ class PythiaLive:
         except KeyboardInterrupt:
             logger.info("Stopping Pythia Live...")
             self.running = False
+
+    def _run_quant_maintenance(self, markets: List[Dict]) -> None:
+        """Periodic calibration/correlation/risk tasks."""
+        try:
+            if self.cycle_count % self.config.CALIBRATION_CHECK_INTERVAL == 0:
+                report = self.calibration_tracker.get_calibration_report(
+                    days=self.config.CALIBRATION_WINDOW_DAYS
+                )
+                drift = self.calibration_tracker.detect_calibration_drift(window_days=7)
+                logger.info(
+                    "Calibration report: count=%d brier=%.4f drifting=%s",
+                    report.get("count", 0),
+                    report.get("brier", {}).get("brier_score", 0.0),
+                    drift.get("drifting", False),
+                )
+
+            if self.cycle_count % self.config.CORRELATION_REFRESH_CYCLES == 0:
+                top_markets = [m["id"] for m in markets[:20]]
+                corr = self.cross_corr_engine.compute_correlation_matrix(
+                    top_markets, hours=self.config.PROB_ENGINE_WINDOW_HOURS
+                )
+                logger.info("Correlation matrix refreshed for %d markets", 0 if corr.empty else corr.shape[0])
+
+            if self.cycle_count % max(1, int(self.config.STRESS_TEST_INTERVAL / self.config.POLL_INTERVAL)) == 0:
+                all_returns = []
+                for market in markets[:20]:
+                    all_returns.extend(self.db.get_returns_series(market["id"], days=self.config.EVT_LOOKBACK_DAYS))
+                if len(all_returns) >= 20:
+                    self.evt_risk_model.fit_tail(all_returns, self.config.EVT_THRESHOLD_PERCENTILE)
+                    var95 = self.evt_risk_model.var(0.95)
+                    var99 = self.evt_risk_model.var(0.99)
+                    es95 = self.evt_risk_model.expected_shortfall(0.95)
+                    es99 = self.evt_risk_model.expected_shortfall(0.99)
+                    self.db.save_risk_snapshot(
+                        portfolio_var_95=var95,
+                        portfolio_var_99=var99,
+                        expected_shortfall_95=es95,
+                        expected_shortfall_99=es99,
+                        gpd_shape=self.evt_risk_model.shape,
+                        gpd_scale=self.evt_risk_model.scale,
+                        n_positions=0,
+                        total_exposure=0.0,
+                        stress_test_results={"status": "periodic"},
+                    )
+
+                    gov = get_governance()
+                    if gov and hasattr(gov, "circuit_breaker"):
+                        gov.circuit_breaker.check_expected_shortfall(
+                            expected_shortfall_99=es99,
+                            threshold=self.config.EMERGENCY_ES_THRESHOLD,
+                        )
+        except Exception as e:
+            logger.warning("Quant maintenance failed: %s", e)
 
     def _discover_markets(self) -> List[Dict]:
         """Discover liquid markets from all sources, then deduplicate."""
@@ -621,8 +684,21 @@ class PythiaLive:
                 description=signal.description,
                 old_price=signal.old_price,
                 new_price=signal.new_price,
-                expected_return=signal.expected_return
+                expected_return=signal.expected_return,
+                metadata=signal.metadata,
+                probability_context=signal.probability_context,
             )
+            forecast_prob = signal.probability_context.get("fitted_mean")
+            if forecast_prob is None and signal.new_price is not None:
+                forecast_prob = float(signal.new_price)
+            if forecast_prob is not None:
+                forecast_id = self.calibration_tracker.record_forecast(
+                    market_id=signal.market_id,
+                    forecast_prob=float(forecast_prob),
+                    signal_type=signal.signal_type,
+                    metadata={"signal_id": signal_id},
+                )
+                signal.metadata["forecast_id"] = forecast_id
 
             # Count by severity
             if signal.severity == "CRITICAL":
