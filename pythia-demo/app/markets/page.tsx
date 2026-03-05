@@ -60,12 +60,13 @@ function ProbabilityBar({ probability }: { probability: number }) {
   );
 }
 
-// SVG sparkline chart with spike areas highlighted
-function SparklineChart({ data, width = 200, height = 48 }: { data: number[]; width?: number; height?: number }) {
+// SVG sparkline chart with spike areas highlighted — uses viewBox for responsive width
+function SparklineChart({ data, height = 48 }: { data: number[]; height?: number }) {
   if (!data || data.length < 2) return null;
 
+  const vbWidth = 400;
   const padding = 2;
-  const chartW = width - padding * 2;
+  const chartW = vbWidth - padding * 2;
   const chartH = height - padding * 2;
   const min = Math.min(...data) - 0.02;
   const max = Math.max(...data) + 0.02;
@@ -97,7 +98,11 @@ function SparklineChart({ data, width = 200, height = 48 }: { data: number[]; wi
   const areaPath = linePath + ` L${toX(data.length - 1).toFixed(1)},${(height - padding).toFixed(1)} L${padding.toFixed(1)},${(height - padding).toFixed(1)} Z`;
 
   return (
-    <svg width={width} height={height} style={{ display: 'block' }}>
+    <svg
+      viewBox={`0 0 ${vbWidth} ${height}`}
+      preserveAspectRatio="none"
+      style={{ display: 'block', width: '100%', height }}
+    >
       {/* Spike highlight regions */}
       {spikeRegions.map((region, idx) => (
         <rect
@@ -113,9 +118,9 @@ function SparklineChart({ data, width = 200, height = 48 }: { data: number[]; wi
       {/* Area fill */}
       <path d={areaPath} fill="rgba(26, 86, 219, 0.06)" />
       {/* Line */}
-      <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={linePath} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       {/* Current value dot */}
-      <circle cx={toX(data.length - 1)} cy={toY(data[data.length - 1])} r="2.5" fill="var(--accent)" />
+      <circle cx={toX(data.length - 1)} cy={toY(data[data.length - 1])} r="3" fill="var(--accent)" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
@@ -431,46 +436,46 @@ function MarketCard({ market }: { market: MarketWithSignal }) {
         </div>
       )}
 
-      {/* Main content: question + chart side by side */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1 }}>
-          {/* Question */}
-          <h3 style={{
-            fontSize: 'var(--text-md)',
-            fontWeight: 600,
-            color: 'var(--text-primary)',
-            lineHeight: 1.4,
-            marginBottom: 14,
-            paddingRight: (!hasSignal && market.trending) ? 70 : 0,
-            paddingTop: hasSignal ? 4 : 0,
-          }}>
-            {market.question}
-          </h3>
+      {/* Question */}
+      <h3 style={{
+        fontSize: 'var(--text-md)',
+        fontWeight: 600,
+        color: 'var(--text-primary)',
+        lineHeight: 1.4,
+        marginBottom: 12,
+        paddingRight: (!hasSignal && market.trending) ? 70 : 0,
+        paddingTop: hasSignal ? 4 : 0,
+      }}>
+        {market.question}
+      </h3>
 
-          {/* Probability bar */}
-          <div style={{ marginBottom: 14 }}>
-            <ProbabilityBar probability={market.probability} />
-          </div>
-        </div>
-
-        {/* Sparkline chart */}
-        {market.probabilityHistory && market.probabilityHistory.length > 0 && (
+      {/* Probability chart — main visual */}
+      {market.probabilityHistory && market.probabilityHistory.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <SparklineChart data={market.probabilityHistory} height={64} />
           <div style={{
-            flexShrink: 0,
             display: 'flex',
-            flexDirection: 'column',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            paddingTop: hasSignal ? 6 : 0,
+            marginTop: 4,
           }}>
-            <SparklineChart data={market.probabilityHistory} width={140} height={48} />
             <span style={{
               fontSize: '9px',
               color: 'var(--text-muted)',
-              marginTop: 2,
               fontFamily: 'var(--font-mono)',
-            }}>30d probability</span>
+            }}>30d ago</span>
+            <span style={{
+              fontSize: '9px',
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}>now</span>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Probability bar — compact secondary */}
+      <div style={{ marginBottom: 14 }}>
+        <ProbabilityBar probability={market.probability} />
       </div>
 
       {/* Meta row */}
