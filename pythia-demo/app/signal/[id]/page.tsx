@@ -99,8 +99,8 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
       <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-md)' }}>Signal not found</p>
-          <Link href="/" style={{ color: 'var(--accent-text)', fontSize: 'var(--text-sm)', marginTop: 12, display: 'inline-block' }}>
-            Back to feed
+          <Link href="/markets" style={{ color: 'var(--accent-text)', fontSize: 'var(--text-sm)', marginTop: 12, display: 'inline-block' }}>
+            Back to Markets
           </Link>
         </div>
       </div>
@@ -128,7 +128,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <Link href="/" style={{
+          <Link href="/markets" style={{
             display: 'flex',
             alignItems: 'center',
             gap: 6,
@@ -141,7 +141,7 @@ export default function SignalDetailPage({ params }: { params: Promise<{ id: str
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 19l-7-7 7-7" />
             </svg>
-            Back
+            Back to Markets
           </Link>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <a
