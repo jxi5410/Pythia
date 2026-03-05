@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { pmxtService } from '@/lib/pmxt';
+
+export const runtime = 'nodejs';
+
 // Mock data for demo - in production this would fetch from Pythia backend
 const mockSignals = [
   {
@@ -67,10 +71,23 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
 
-  let filteredSignals = mockSignals;
+  let filteredSignals = [...mockSignals];
   
   if (category && category !== 'all') {
     filteredSignals = mockSignals.filter(s => s.category === category);
+  }
+
+  if ((process.env.PYTHIA_DATA_SOURCE ?? 'live') === 'live') {
+    try {
+      const hints = await pmxtService.fetchSourceUrlHints();
+      filteredSignals = filteredSignals.map((signal) => {
+        const key = `${signal.source}:${signal.category}`;
+        const hintedUrl = hints[key];
+        return hintedUrl ? { ...signal, sourceUrl: hintedUrl } : signal;
+      });
+    } catch {
+      // Keep mock source URLs when PMXT is unavailable.
+    }
   }
 
   // Sort by timestamp desc

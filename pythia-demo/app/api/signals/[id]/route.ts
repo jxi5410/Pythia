@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { pmxtService } from '@/lib/pmxt';
 import { SignalDetail } from '@/types';
+
+export const runtime = 'nodejs';
 
 // Extended mock data with full signal details
 const mockSignalDetails: Record<string, SignalDetail> = {
@@ -166,13 +169,25 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const signal = mockSignalDetails[id];
+  let signal = mockSignalDetails[id];
 
   if (!signal) {
     return NextResponse.json(
       { error: 'Signal not found' },
       { status: 404 }
     );
+  }
+
+  if ((process.env.PYTHIA_DATA_SOURCE ?? 'live') === 'live') {
+    try {
+      const hints = await pmxtService.fetchSourceUrlHints();
+      const hintedUrl = hints[`${signal.source}:${signal.category}`];
+      if (hintedUrl) {
+        signal = { ...signal, sourceUrl: hintedUrl };
+      }
+    } catch {
+      // Keep mock URL if PMXT is unavailable.
+    }
   }
 
   return NextResponse.json(signal);

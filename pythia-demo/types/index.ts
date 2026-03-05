@@ -67,6 +67,7 @@ export interface Market {
   trending: boolean;
   tags: string[];
   probabilityHistory: number[];
+  dataSource?: 'live' | 'mock';
   signal?: Signal & { trackRecord?: TrackRecordSummary };
 }
 

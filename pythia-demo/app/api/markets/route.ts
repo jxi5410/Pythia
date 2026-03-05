@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { pmxtService } from '@/lib/pmxt';
+
+export const runtime = 'nodejs';
+
 // Generate mock probability history with occasional spikes
 function genHistory(current: number, previous: number, points: number = 30): number[] {
   const history: number[] = [];
@@ -307,47 +311,104 @@ export async function GET(request: Request) {
   const category = searchParams.get('category');
   const sort = searchParams.get('sort') || 'volume';
   const source = searchParams.get('source');
+  const dataSourceMode = process.env.PYTHIA_DATA_SOURCE ?? 'live';
 
-  let filtered = [...mockMarkets];
+  const buildMockResponse = () => {
+    let filtered = [...mockMarkets];
 
-  if (category && category !== 'all') {
-    filtered = filtered.filter(m => m.category === category);
+    if (category && category !== 'all') {
+      filtered = filtered.filter(m => m.category === category);
+    }
+
+    if (source && source !== 'all') {
+      filtered = filtered.filter(m => m.source === source);
+    }
+
+    if (sort === 'volume') {
+      filtered.sort((a, b) => b.volume24h - a.volume24h);
+    } else if (sort === 'change') {
+      filtered.sort((a, b) =>
+        Math.abs(b.probability - b.previousProbability) -
+        Math.abs(a.probability - a.previousProbability)
+      );
+    } else if (sort === 'probability') {
+      filtered.sort((a, b) => b.probability - a.probability);
+    } else if (sort === 'ending') {
+      filtered.sort((a, b) =>
+        new Date(a.endDate).getTime() - new Date(b.endDate).getTime()
+      );
+    }
+
+    const marketsWithData = filtered.map(m => ({
+      ...m,
+      probabilityHistory: genHistory(m.probability, m.previousProbability),
+      signal: marketSignals[m.id] || null,
+      dataSource: 'mock' as const,
+    }));
+
+    // Signal-triggered markets float to top
+    marketsWithData.sort((a, b) => {
+      if (a.signal && !b.signal) return -1;
+      if (!a.signal && b.signal) return 1;
+      return 0;
+    });
+
+    return NextResponse.json({
+      markets: marketsWithData,
+      dataSource: 'mock',
+      lastUpdated: new Date().toISOString(),
+    });
+  };
+
+  if (dataSourceMode === 'mock') {
+    return buildMockResponse();
   }
 
-  if (source && source !== 'all') {
-    filtered = filtered.filter(m => m.source === source);
-  }
+  try {
+    const liveMarkets = await pmxtService.fetchMarkets({
+      category,
+      source,
+      sort,
+      limit: 120,
+    });
 
-  if (sort === 'volume') {
-    filtered.sort((a, b) => b.volume24h - a.volume24h);
-  } else if (sort === 'change') {
-    filtered.sort((a, b) =>
-      Math.abs(b.probability - b.previousProbability) -
-      Math.abs(a.probability - a.previousProbability)
+    const marketWithHistory = await Promise.all(
+      liveMarkets.map(async (market) => {
+        let history = genHistory(market.probability, market.previousProbability);
+        if (market.outcomeId) {
+          try {
+            history = await pmxtService.fetchOHLCV(market.source, market.outcomeId);
+          } catch {
+            // Keep synthetic fallback history for UX continuity.
+          }
+        }
+
+        // Attach existing signal mocks by category+source if available.
+        const signal = Object.values(marketSignals).find(
+          (s) => s.category === market.category && s.source === market.source
+        );
+
+        return {
+          ...market,
+          probabilityHistory: history,
+          signal: signal ?? null,
+          dataSource: 'live' as const,
+        };
+      })
     );
-  } else if (sort === 'probability') {
-    filtered.sort((a, b) => b.probability - a.probability);
-  } else if (sort === 'ending') {
-    filtered.sort((a, b) =>
-      new Date(a.endDate).getTime() - new Date(b.endDate).getTime()
-    );
+
+    marketWithHistory.sort((a, b) => {
+      if (a.signal && !b.signal) return -1;
+      if (!a.signal && b.signal) return 1;
+      return 0;
+    });
+
+    return NextResponse.json({
+      markets: marketWithHistory,
+      dataSource: 'live',
+      lastUpdated: new Date().toISOString(),
+    });
+  } catch {
+    return buildMockResponse();
   }
-
-  const marketsWithData = filtered.map(m => ({
-    ...m,
-    probabilityHistory: genHistory(m.probability, m.previousProbability),
-    signal: marketSignals[m.id] || null,
-  }));
-
-  // Signal-triggered markets float to top
-  marketsWithData.sort((a, b) => {
-    if (a.signal && !b.signal) return -1;
-    if (!a.signal && b.signal) return 1;
-    return 0;
-  });
-
-  return NextResponse.json({
-    markets: marketsWithData,
-    lastUpdated: new Date().toISOString(),
-  });
 }
