@@ -13,6 +13,30 @@ Pythia has **two interfaces** — a Streamlit dashboard (backend/analytics) and 
 
 The upgrade path is not a full rewrite. It's a focused set of changes to cross the threshold from "impressive prototype" to "institutional product."
 
+**CRITICAL — P0 issues identified by UX Researcher that must be fixed before any design partner demo:**
+1. **Fabricated performance data** in `dashboard.py:377-607` and `tracking/page.tsx:176-196` — hardcoded win rates, Sharpe ratios, and returns that institutional users will immediately identify as fake
+2. **Hardcoded Mac path** in `dashboard.py:57` — dashboard is non-functional for anyone but the original developer
+3. **Signal panels buried below the fold** — the core value prop is hidden at the bottom of market cards
+4. **No navigation in PWA** — `/tracking` page is unreachable without typing the URL
+5. **Edge Window banner at bottom of signal detail** — the most time-sensitive information is in the worst position
+
+---
+
+## Phase 0: Credibility Destroyers (Fix Before Any Demo)
+
+These issues will **instantly end conversations** with institutional design partners.
+
+| # | Issue | Location | Fix |
+|---|-------|----------|-----|
+| 0.1 | **Remove all fabricated performance data** | `dashboard.py:377-607` (Analysis tab), `tracking/page.tsx:176-196` | Show real data or an honest "collecting data" empty state. The existing empty state pattern in tracking already handles this. |
+| 0.2 | **Fix hardcoded Mac path** | `dashboard.py:57` | Use environment variable or relative path |
+| 0.3 | **Move Edge Window banner to top of signal detail** | `signal/[id]/page.tsx:420-462` | Move to immediately after title (line 216). Also render the `edgeDecayCurve` data — it exists in the type system but is never visualized |
+| 0.4 | **Add bottom navigation bar to PWA** | `layout.tsx` | Persistent nav: Signals, Markets, Tracking, Settings. Currently `/tracking` is unreachable |
+| 0.5 | **Make homepage signal-first, not market-first** | `page.tsx:4` | Change redirect from `/markets` to a signal feed. Signals are the value prop; markets are context |
+| 0.6 | **Elevate signal panels above the fold** | `markets/page.tsx:546-548` | Move `SignalAnalysisPanel` above sparkline chart when a signal is active |
+| 0.7 | **Fix `userScalable: false`** | `layout.tsx:8` | WCAG 2.1 Level AA violation — remove zoom blocking |
+| 0.8 | **Fix manifest theme mismatch** | `manifest.json:8-9` | Theme color `#09090b` (dark) but app is light `#f7f7f8` — causes jarring flash on PWA launch |
+
 ---
 
 ## UX Researcher Assessment
@@ -318,11 +342,48 @@ The UI upgrade is complete when:
 
 ## Quick Wins (Can Ship Today)
 
-1. Add dark mode CSS tokens (30 min)
-2. Add "last updated" freshness indicator (30 min)
-3. Add price tick flash animation CSS (15 min)
-4. Extract `ProbabilityBar` and `SparklineChart` to `components/` (1 hr)
-5. Add compact view toggle with CSS grid (2 hrs)
+1. **Remove fake performance data** from Analysis tab and tracking page (1 hr) — P0
+2. **Add bottom nav bar** to PWA layout (1 hr) — P0
+3. **Move Edge Window banner to top** of signal detail page (30 min) — P0
+4. **Fix manifest.json theme color** to match light theme (5 min) — P0
+5. **Remove `userScalable: false`** from layout.tsx (1 min) — P0
+6. Add dark mode CSS tokens (30 min)
+7. Add "last updated" freshness indicator (30 min)
+8. Add price tick flash animation CSS (15 min)
+9. Extract `ProbabilityBar` and `SparklineChart` to `components/` (1 hr)
+10. Add compact view toggle with CSS grid (2 hrs)
+
+---
+
+## Accessibility Issues (from UX Researcher)
+
+| Issue | Location | WCAG | Fix |
+|-------|----------|------|-----|
+| Zoom disabled | `layout.tsx:8` `userScalable: false` | 1.4.4 AA | Remove |
+| Low contrast text | `dashboard.py:39` `#a1a1aa` on `#131316` = ~4.2:1 | 1.4.3 AA (needs 4.5:1) | Lighten text |
+| Low contrast dimmed | `terminal.py:128` `#52525b` on `#09090b` = ~3.0:1 | 1.4.3 AA | Lighten text |
+| Color-only encoding | Severity and +/- moves use color only | 1.4.1 A | Add icons/arrows |
+| Touch targets too small | Source badges 24px height | 2.5.5 AAA (rec 44px) | Increase padding |
+| No skip navigation | No skip-to-content link | 2.4.1 A | Add skip link |
+| Emoji tab labels | `dashboard.py:168-169` | Screen reader noise | Use text labels |
+| Manifest theme mismatch | `manifest.json` dark vs light theme | PWA flash | Match to actual theme |
+
+---
+
+## Key Files Referenced
+
+- `/home/user/Pythia/dashboard.py` — Streamlit dashboard (881 lines)
+- `/home/user/Pythia/terminal.py` — Streamlit terminal (804 lines)
+- `/home/user/Pythia/pythia-demo/app/page.tsx` — PWA root (redirects to /markets)
+- `/home/user/Pythia/pythia-demo/app/markets/page.tsx` — Markets page (979 lines)
+- `/home/user/Pythia/pythia-demo/app/signal/[id]/page.tsx` — Signal detail (467 lines)
+- `/home/user/Pythia/pythia-demo/app/tracking/page.tsx` — Track record (306 lines)
+- `/home/user/Pythia/pythia-demo/components/SignalCard.tsx` — Signal card (267 lines)
+- `/home/user/Pythia/pythia-demo/app/globals.css` — Design system (359 lines)
+- `/home/user/Pythia/pythia-demo/app/layout.tsx` — PWA layout (43 lines)
+- `/home/user/Pythia/pythia-demo/lib/pmxt.ts` — Market data service (304 lines)
+- `/home/user/Pythia/pythia-demo/types/index.ts` — TypeScript types (80 lines)
+- `/home/user/Pythia/pythia-demo/public/manifest.json` — PWA manifest (23 lines)
 
 ---
 
