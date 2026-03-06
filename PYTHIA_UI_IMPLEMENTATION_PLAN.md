@@ -36,6 +36,7 @@ These issues will **instantly end conversations** with institutional design part
 | 0.6 | **Elevate signal panels above the fold** | `markets/page.tsx:546-548` | Move `SignalAnalysisPanel` above sparkline chart when a signal is active |
 | 0.7 | **Fix `userScalable: false`** | `layout.tsx:8` | WCAG 2.1 Level AA violation — remove zoom blocking |
 | 0.8 | **Fix manifest theme mismatch** | `manifest.json:8-9` | Theme color `#09090b` (dark) but app is light `#f7f7f8` — causes jarring flash on PWA launch |
+| 0.9 | **Fix command injection in tracking API** | `api/tracking/route.ts:13` | `execSync` with string interpolation is a security/performance issue. Replace with `better-sqlite3` or HTTP call to Pythia backend |
 
 ---
 
@@ -278,6 +279,24 @@ The Streamlit dashboard (`dashboard.py`) has inline CSS, hardcoded DB paths, and
 
 ---
 
+## UX Architect: Cross-Interface Fragmentation
+
+The two interfaces present as **entirely different products**:
+
+| Concern | Streamlit Dashboard | Next.js PWA |
+|---|---|---|
+| Theme | Dark (#09090b) | Light (#f7f7f8) |
+| Critical color | #f43f5e | #dc2626 |
+| Positive color | #10b981 | #16a34a |
+| Warning color | #eab308 | #d97706 |
+| Font | System default | Inter + JetBrains Mono |
+| Styling approach | Inline HTML strings | Inline `style={{}}` objects |
+| Data model | SQLite columns (severity, expected_return) | TypeScript types (confluenceLayers, confidenceScore) |
+
+**Tailwind is imported but 100% unused.** All styling is inline `style={{}}` objects that create new JS objects on every render, bloating the bundle and preventing CSS caching. The `onMouseEnter/onMouseLeave` handlers in MarketCard directly mutate DOM styles, bypassing React reconciliation.
+
+**No shared data contract.** The Streamlit dashboard reads from SQLite with one schema, the Next.js app uses completely different TypeScript types. These need to converge.
+
 ## Design Token Additions Needed
 
 ```css
@@ -323,6 +342,37 @@ The Streamlit dashboard (`dashboard.py`) has inline CSS, hardcoded DB paths, and
   100% { background-color: transparent; }
 }
 ```
+
+---
+
+## Unified Design Tokens (from UX Architect)
+
+Single source of truth for both interfaces, using `--py-` prefix:
+
+```
+--py-bg-base:           #09090b | #f7f7f8    (dark | light)
+--py-bg-card:           #131316 | #ffffff
+--py-text-primary:      #fafafa | #18181b
+--py-text-secondary:    #a1a1aa | #52525b
+--py-text-muted:        #71717a | #a1a1aa
+--py-accent:            #3b82f6 | #1a56db
+--py-positive:          #10b981 | #16a34a
+--py-negative:          #f43f5e | #dc2626
+--py-warning:           #eab308 | #d97706
+--py-severity-critical: #dc2626
+--py-severity-high:     #ea580c
+--py-severity-medium:   #ca8a04
+--py-severity-low:      #16a34a
+--py-radius-sm:         8px
+--py-radius-md:         10px
+--py-radius-lg:         12px
+--py-space-unit:        4px   (multiply for scale)
+--py-font-sans:         'Inter', system-ui, sans-serif
+--py-font-mono:         'JetBrains Mono', monospace
+--py-max-width:         960px
+```
+
+This serves as the canonical reference consumed by CSS custom properties in the PWA and a Python config dict in the Streamlit app.
 
 ---
 
