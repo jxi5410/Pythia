@@ -37,6 +37,10 @@ These issues will **instantly end conversations** with institutional design part
 | 0.7 | **Fix `userScalable: false`** | `layout.tsx:8` | WCAG 2.1 Level AA violation — remove zoom blocking |
 | 0.8 | **Fix manifest theme mismatch** | `manifest.json:8-9` | Theme color `#09090b` (dark) but app is light `#f7f7f8` — causes jarring flash on PWA launch |
 | 0.9 | **Fix command injection in tracking API** | `api/tracking/route.ts:13` | `execSync` with string interpolation is a security/performance issue. Replace with `better-sqlite3` or HTTP call to Pythia backend |
+| 0.10 | **Load Inter + JetBrains Mono fonts** | `layout.tsx` (PWA), both Streamlit files | Fonts are specified in CSS but **never loaded** — browser falls back to system fonts. 2-line fix that dramatically improves perceived quality |
+| 0.11 | **Add "DEMO DATA" indicator** | PWA API routes, `markets/page.tsx` | `dataSource?: 'live' \| 'mock'` field already exists on markets — render a visible watermark/badge when mock data is active |
+| 0.12 | **Consolidate on `terminal.py`** | `dashboard.py`, `terminal.py` | Two separate Streamlit apps with overlapping features. `terminal.py` (v1.0) is more mature — deprecate `dashboard.py` (v0.5) |
+| 0.13 | **Remove emoji from Streamlit tab labels** | `dashboard.py:168-169` | Use uppercase text labels. Emojis read as consumer-grade; Bloomberg/Refinitiv use text-only |
 
 ---
 
@@ -276,6 +280,35 @@ The Streamlit dashboard (`dashboard.py`) has inline CSS, hardcoded DB paths, and
 | 5.2 | **Spike Explorer** — historical spike analysis | Medium | High | New `app/explore/page.tsx` |
 | 5.3 | **Analysis/Backtesting** — track record deep dive | Medium | High | Upgrade `app/tracking/page.tsx` |
 | 5.4 | **Deprecate Streamlit** for customer-facing use | Low | Low | Documentation update |
+
+---
+
+## UI Designer: Visual Design Scores
+
+| Axis | Streamlit | Next.js PWA | Notes |
+|------|-----------|-------------|-------|
+| Visual Quality | 4/10 | 7.5/10 | Streamlit chrome bleeds through; PWA has genuine design system |
+| Color System | 6/10 | 8/10 | PWA is best in project — 50+ tokens. Streamlit has inline hex strings |
+| Typography | 5/10 | 7/10 | Good font choices but **neither interface loads the fonts** |
+| Component Quality | 4/10 | 7.5/10 | PWA SparklineChart + TrackRecordTooltip are standouts |
+| Data Visualization | 5/10 | 7/10 | PWA sparklines with spike detection are excellent. Both miss edge decay |
+| Micro-interactions | 2/10 | 6/10 | Streamlit hits architectural limits. PWA has card hovers, pulsing dots |
+| Trading UI Patterns | 5/10 | 6.5/10 | Both miss watchlists, keyboard nav, multi-panel, audio alerts |
+
+### Key UI Designer Finding: Edge Decay Curve is Pythia's Killer Visual
+
+The `edgeDecayCurve` data (time + alphaRemaining values) exists in the TypeScript types and is returned by the API — but is **never rendered visually anywhere**. The signal detail page only shows a text warning ("signal gets priced in within 18hrs").
+
+This is Pythia's most distinctive and novel data point — a visualization showing alpha decaying over time would be the single most valuable chart for an institutional trader timing an entry. **Rendering this chart should be the #1 data visualization priority.**
+
+### Other UI Designer Findings
+
+- **Accent color too close to Kalshi badge** — `--accent: #1a56db` overlaps with Kalshi source badge color. Consider teal (#0d9488) or indigo (#4f46e5) for brand differentiation
+- **Heatmap midpoint invisible** — `dashboard.py` heatmap uses `#1c1c22` midpoint on `#09090b` background. Lighten to `#3f3f46`
+- **ASCII confidence bars in terminal.py** — block characters (`█░`) look crude vs. rendered progress bars
+- **No skeleton loading screens** — cards should show gray placeholders during load (Kalshi pattern)
+- **PWA should have pull-to-refresh and haptic feedback** for mobile-native feel
+- **Streamlit "heatmap" is actually a bar chart** — replace with `px.treemap()` for real information density
 
 ---
 
