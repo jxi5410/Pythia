@@ -120,7 +120,7 @@ function LivePulse() {
 // ================================================================
 // Hero Panel
 // ================================================================
-const HERO_H = 460;
+const HERO_H = 500;
 
 function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, bookmarked, onBookmark, onShare, lastUpdated }: {
   market: MarketData; index: number; total: number;
@@ -194,27 +194,31 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
           </div>
 
           {/* Right: chart */}
-          <div style={{ flex: 1, padding: '12px 16px 24px 0', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'visible' }}>
+          <div style={{ flex: 1, padding: '12px 16px 14px 0', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'visible' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <SpikeChart data={market.probabilityHistory} height={340} width={860}
+              <SpikeChart data={market.probabilityHistory} height={330} width={860}
                 showSpikes spikeThreshold={0.035} interactive
                 spikeAttributors={market.spikeAttributors}
                 lastUpdated={lastUpdated} />
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Nav below */}
-      <div style={{ maxWidth: 1180, margin: '4px auto 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {Array.from({ length: total }).map((_, i) => (
-            <span key={i} style={{ width: i === index ? 22 : 7, height: 7, borderRadius: 4, background: i === index ? NO_C : 'var(--border-default)', transition: 'width 0.3s, background 0.3s' }} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 16 }}>
-          {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 340, flexShrink: 0 }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
-          {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 340, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span>›</span></button>}
+        {/* Nav row — INSIDE panel at bottom, above rounded corners */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '6px 22px 12px', borderTop: '1px solid var(--border-subtle)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {Array.from({ length: total }).map((_, i) => (
+              <span key={i} style={{ width: i === index ? 22 : 7, height: 7, borderRadius: 4, background: i === index ? NO_C : 'var(--border-default)', transition: 'width 0.3s, background 0.3s' }} />
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 24 }}>
+            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 280, flexShrink: 0 }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
+            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 280, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span>›</span></button>}
+          </div>
         </div>
       </div>
     </div>
