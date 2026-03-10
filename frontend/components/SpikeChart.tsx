@@ -62,18 +62,18 @@ function detectSpikes(data: number[], threshold: number = 0.03, windowSize: numb
 
 function spikeShadeColor(dir: 'up' | 'down', mag: number): string {
   if (dir === 'up') {
-    if (mag >= 0.08) return 'rgba(22,163,74,0.12)';
-    if (mag >= 0.05) return 'rgba(22,163,74,0.08)';
-    return 'rgba(22,163,74,0.05)';
+    if (mag >= 0.08) return 'rgba(120,140,93,0.14)';
+    if (mag >= 0.05) return 'rgba(120,140,93,0.09)';
+    return 'rgba(120,140,93,0.05)';
   } else {
-    if (mag >= 0.08) return 'rgba(220,38,38,0.12)';
-    if (mag >= 0.05) return 'rgba(220,38,38,0.08)';
-    return 'rgba(220,38,38,0.05)';
+    if (mag >= 0.08) return 'rgba(196,69,54,0.14)';
+    if (mag >= 0.05) return 'rgba(196,69,54,0.09)';
+    return 'rgba(196,69,54,0.05)';
   }
 }
 
 function spikeEdgeColor(dir: 'up' | 'down'): string {
-  return dir === 'up' ? 'rgba(22,163,74,0.3)' : 'rgba(220,38,38,0.3)';
+  return dir === 'up' ? 'rgba(120,140,93,0.35)' : 'rgba(196,69,54,0.35)';
 }
 
 function fmtDuration(points: number, totalPoints: number, totalHours: number): string {
@@ -148,7 +148,7 @@ export default function SpikeChart({
 
   if (!chart || !data || data.length < 2) return null;
 
-  const lineColor = positive ? '#16a34a' : '#dc2626';
+  const lineColor = positive ? '#788c5d' : '#c44536';
   const fillColor = positive ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)';
   const totalHours = 30 * 24; // 30 days assumption
 
@@ -215,7 +215,7 @@ export default function SpikeChart({
           <>
             {/* Vertical line */}
             <line x1={cursor.x} y1={pad.top} x2={cursor.x} y2={pad.top + ch}
-              stroke="#18181b" strokeWidth={0.8} />
+              stroke="#141413" strokeWidth={0.8} />
             {/* Dot on line */}
             <circle cx={chart.sx(cursor.idx)} cy={chart.sy(cursorVal)}
               r={4} fill={lineColor} stroke="white" strokeWidth={2} />
@@ -250,7 +250,7 @@ export default function SpikeChart({
           position: 'absolute',
           left: Math.min(chart.sx(hoveredSpike.startIdx) + 8, width - 240),
           top: height - 8,
-          background: '#18181b', color: 'white', borderRadius: 10,
+          background: '#141413', color: '#faf9f5', borderRadius: 10,
           padding: '12px 16px', fontSize: 12, lineHeight: 1.6,
           boxShadow: '0 8px 24px rgba(0,0,0,0.25)', pointerEvents: 'none', zIndex: 20,
           minWidth: 200, maxWidth: 280,
@@ -272,7 +272,7 @@ export default function SpikeChart({
             </span>
             <span style={{
               fontFamily: "'JetBrains Mono', monospace", fontWeight: 700,
-              color: hoveredSpike.direction === 'up' ? '#4ade80' : '#f87171',
+              color: hoveredSpike.direction === 'up' ? '#a3b88c' : '#e07060',
             }}>
               {hoveredSpike.direction === 'up' ? '+' : '-'}{(hoveredSpike.magnitude * 100).toFixed(1)}pp
             </span>

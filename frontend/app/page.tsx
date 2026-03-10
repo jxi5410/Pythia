@@ -81,7 +81,7 @@ function SourceLogo({ source }: { source: string }) {
       <span style={{
         width: 20, height: 20, borderRadius: 4, display: 'inline-flex',
         alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800,
-        background: isKalshi ? '#0ea5e9' : '#7c3aed', color: 'white', letterSpacing: '-0.02em',
+        background: isKalshi ? '#6a9bcc' : '#d97757', color: 'white', letterSpacing: '-0.02em',
       }}>
         {isKalshi ? 'K' : 'P'}
       </span>
@@ -224,7 +224,7 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
             {/* Legend + current prob */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginBottom: 4, flexShrink: 0 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: pos ? '#16a34a' : '#dc2626', display: 'inline-block' }} />
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: pos ? '#788c5d' : '#c44536', display: 'inline-block' }} />
                 Yes {(market.probability * 100).toFixed(0)}%
               </span>
               <span className={`price-move ${pos ? 'price-up' : 'price-down'}`} style={{ fontSize: 12 }}>
