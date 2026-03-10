@@ -54,24 +54,24 @@ function genHistory(current: number, previous: number, points: number = 200): nu
   return history;
 }
 
-// Generate realistic volume history — correlated with price moves (spikes = high volume)
+// Generate realistic volume history — correlated with price moves, normalized to totalVolume
 function genVolumeHistory(priceHistory: number[], totalVolume: number, points?: number): number[] {
   const n = points || priceHistory.length;
-  const vol: number[] = [];
-  const avgVol = totalVolume / n;
+  const raw: number[] = [];
 
   for (let i = 0; i < n; i++) {
-    // Base volume with random variation
-    let v = avgVol * (0.3 + Math.random() * 1.4);
-    // Spike correlation: large price moves → volume spike
+    let v = 0.3 + Math.random() * 1.4;
     if (i > 0 && priceHistory[i] !== undefined && priceHistory[i - 1] !== undefined) {
       const move = Math.abs(priceHistory[i] - priceHistory[i - 1]);
       if (move > 0.02) v *= 2.5 + Math.random() * 2;
       else if (move > 0.01) v *= 1.5 + Math.random();
     }
-    vol.push(Math.round(v));
+    raw.push(v);
   }
-  return vol;
+  // Normalize so sum = totalVolume
+  const rawSum = raw.reduce((a, b) => a + b, 0);
+  const scale = totalVolume / rawSum;
+  return raw.map(v => Math.round(v * scale));
 }
 
 // Mock signal data linked to specific markets

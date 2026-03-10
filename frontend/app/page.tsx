@@ -161,11 +161,15 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
 
         {/* Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'visible' }}>
-          {/* Left */}
-          <div style={{ flex: '0 0 280px', padding: '12px 22px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ marginBottom: 10, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><SourceLink source={market.source} url={market.sourceUrl} /><LivePulse /></div>
+          {/* Left — spaced out with justify-content */}
+          <div style={{ flex: '0 0 280px', padding: '20px 22px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            {/* Source + Live */}
+            <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <SourceLink source={market.source} url={market.sourceUrl} /><LivePulse />
+            </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', flexShrink: 0 }}>
+            {/* Odds table */}
+            <table style={{ width: '100%', borderCollapse: 'collapse', flexShrink: 0, marginTop: 16 }}>
               <thead>
                 <tr style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
                   <td style={{ padding: '0 0 6px' }}>Market</td>
@@ -187,7 +191,8 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
               </tbody>
             </table>
 
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
+            {/* Supplemental info */}
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
               <span style={{ fontWeight: 600 }}>{fmtCurrency(market.totalVolume)} Vol</span>
               <span>{fmtEndDate(market.endDate)}</span>
               <span>{fmtDaysLeft(market.endDate)}</span>
@@ -217,9 +222,9 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
             ))}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px 0 0', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 270, flexShrink: 0 }}><span style={{ fontSize: 18, lineHeight: 1 }}>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
+            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px 0 0', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#b0aea5', width: 270, flexShrink: 0 }}><span style={{ fontSize: 18, lineHeight: 1, color: '#b0aea5' }}>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
             {prevName && nextName && <span style={{ width: 1, height: 16, background: 'var(--border-default)', flexShrink: 0 }} />}
-            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: '0 0 0 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 270, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span style={{ fontSize: 18, lineHeight: 1 }}>›</span></button>}
+            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: '0 0 0 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#b0aea5', fontWeight: 500, width: 270, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span style={{ fontSize: 18, lineHeight: 1, color: '#b0aea5' }}>›</span></button>}
           </div>
         </div>
       </div>
