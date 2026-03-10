@@ -91,7 +91,7 @@ export default function SpikeChart({
   const [hoveredSpikeIdx, setHoveredSpikeIdx] = useState<number | null>(null);
   const [pinnedSpikeIdx, setPinnedSpikeIdx] = useState<number | null>(null);
 
-  const pad = { top: 10, right: 48, bottom: 36, left: 10 };
+  const pad = { top: 20, right: 48, bottom: 36, left: 10 };
   const cw = width - pad.left - pad.right;
   const ch = height - pad.top - pad.bottom;
 
@@ -187,14 +187,29 @@ export default function SpikeChart({
 
         {chart.spikes.map((s, i) => {
           const x1 = chart.sx(s.startIdx), x2 = chart.sx(s.endIdx);
+          const midX = (x1 + x2) / 2;
           const up = s.direction === 'up';
           const isA = i === activeSI;
+          const hasAttr = s.attributors && s.attributors.length > 0;
+          const markerLabel = hasAttr ? 'P' : '–';
+          const markerBg = hasAttr ? '#d97757' : '#b0aea5';
           return (
-            <g key={`s-${i}`} style={{ cursor: interactive ? 'pointer' : 'default' }}>
+            <g key={`s-${i}`} style={{ cursor: interactive ? 'pointer' : 'default' }}
+              onClick={interactive ? (e) => { e.stopPropagation(); setPinnedSpikeIdx(pinnedSpikeIdx === i ? null : i); } : undefined}>
               <rect x={x1} y={pad.top} width={Math.max(x2 - x1, 4)} height={ch}
                 fill={up ? `rgba(120,140,93,${isA ? 0.18 : 0.10})` : `rgba(196,69,54,${isA ? 0.18 : 0.10})`} rx={2} />
               <line x1={x1} y1={pad.top} x2={x1} y2={pad.top + ch} stroke={up ? 'rgba(120,140,93,0.4)' : 'rgba(196,69,54,0.4)'} strokeWidth={isA ? 1.5 : 1} />
               <line x1={x2} y1={pad.top} x2={x2} y2={pad.top + ch} stroke={up ? 'rgba(120,140,93,0.4)' : 'rgba(196,69,54,0.4)'} strokeWidth={isA ? 1.5 : 1} />
+              {/* P / – marker at top-center */}
+              <circle cx={midX} cy={pad.top - 1} r={8}
+                fill={isA ? markerBg : 'white'} stroke={markerBg} strokeWidth={1.5} />
+              <text x={midX} y={pad.top + 3} textAnchor="middle"
+                fill={isA ? 'white' : markerBg}
+                fontSize={hasAttr ? 9 : 11} fontWeight={700}
+                fontFamily="'JetBrains Mono', monospace"
+                style={{ pointerEvents: 'none' }}>
+                {markerLabel}
+              </text>
             </g>
           );
         })}
