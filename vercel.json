@@ -1,6 +1,1 @@
-{
-  "buildCommand": "cd pythia-demo && npm run build",
-  "installCommand": "cd pythia-demo && npm install",
-  "outputDirectory": "pythia-demo/.next",
-  "framework": "nextjs"
-}
+{"framework": "nextjs"}
