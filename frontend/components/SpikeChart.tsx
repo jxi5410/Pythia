@@ -12,11 +12,12 @@ export interface SpikeData {
   startIdx: number; endIdx: number; magnitude: number;
   direction: 'up' | 'down'; priceBefore: number; priceAfter: number;
   durationPoints: number; attributors: SpikeAttributor[];
-  startDate: string; endDate: string;  // computed timestamps
+  startDate: string; endDate: string;
 }
 
 interface SpikeChartProps {
   data: number[];
+  volumeData?: number[];
   height?: number;
   width?: number;
   showSpikes?: boolean;
@@ -24,41 +25,25 @@ interface SpikeChartProps {
   interactive?: boolean;
   spikeAttributors?: Record<number, SpikeAttributor[]>;
   defaultAttributors?: SpikeAttributor[];
-  totalDays?: number;  // data span in days (default 30)
-  lastUpdated?: string; // ISO timestamp of latest data point
+  totalDays?: number;
+  lastUpdated?: string;
 }
 
-// Improved spike detection:
-// - Multi-scale lookback (checks 3, 6, 10, 15 point windows)
-// - Minimum gap reduced to allow nearby spikes
-// - Adaptive: large moves over longer windows still detected
 function detectSpikes(data: number[], threshold: number): SpikeData[] {
   if (!data || data.length < 4) return [];
   const out: SpikeData[] = [];
   let lastEnd = -4;
-  const windows = [3, 6, 10, 15]; // multi-scale lookback
-
+  const windows = [3, 6, 10, 15];
   for (let i = 3; i < data.length; i++) {
-    let bestStart = i - 1, bestMag = 0;
+    let bs = i - 1, bm = 0;
     for (const ws of windows) {
       const j = Math.max(0, i - ws);
       const mag = Math.abs(data[i] - data[j]);
-      // Scale threshold: longer windows need proportionally less per-point move
-      const scaledThresh = threshold * (ws <= 3 ? 1.0 : ws <= 6 ? 0.85 : ws <= 10 ? 0.75 : 0.65);
-      if (mag >= scaledThresh && mag > bestMag) {
-        bestMag = mag;
-        bestStart = j;
-      }
+      const st = threshold * (ws <= 3 ? 1.0 : ws <= 6 ? 0.85 : ws <= 10 ? 0.75 : 0.65);
+      if (mag >= st && mag > bm) { bm = mag; bs = j; }
     }
-    if (bestMag >= threshold * 0.65 && bestStart >= lastEnd) {
-      out.push({
-        startIdx: bestStart, endIdx: i, magnitude: bestMag,
-        direction: data[i] > data[bestStart] ? 'up' : 'down',
-        priceBefore: data[bestStart], priceAfter: data[i],
-        durationPoints: i - bestStart,
-        attributors: [],
-        startDate: '', endDate: '', // filled later
-      });
+    if (bm >= threshold * 0.65 && bs >= lastEnd) {
+      out.push({ startIdx: bs, endIdx: i, magnitude: bm, direction: data[i] > data[bs] ? 'up' : 'down', priceBefore: data[bs], priceAfter: data[i], durationPoints: i - bs, attributors: [], startDate: '', endDate: '' });
       lastEnd = i;
     }
   }
@@ -74,14 +59,19 @@ function fmtDur(pts: number, total: number, hours: number): string {
 function idxToDate(idx: number, total: number, totalDays: number, lastUpdated?: string): string {
   const endMs = lastUpdated ? new Date(lastUpdated).getTime() : Date.now();
   const daysAgo = totalDays * (1 - idx / Math.max(total - 1, 1));
-  const d = new Date(endMs - daysAgo * 86400000);
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  return new Date(endMs - daysAgo * 86400000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function fmtVol(v: number): string {
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v}`;
 }
 
 const C = '#d97757';
 
 export default function SpikeChart({
-  data, height = 200, width = 600,
+  data, volumeData, height = 200, width = 600,
   showSpikes = true, spikeThreshold = 0.04,
   interactive = true, spikeAttributors, defaultAttributors,
   totalDays = 30, lastUpdated,
@@ -91,9 +81,10 @@ export default function SpikeChart({
   const [hoveredSpikeIdx, setHoveredSpikeIdx] = useState<number | null>(null);
   const [pinnedSpikeIdx, setPinnedSpikeIdx] = useState<number | null>(null);
 
-  const pad = { top: 20, right: 48, bottom: 36, left: 10 };
+  const pad = { top: 20, right: 48, bottom: 32, left: 10 };
   const cw = width - pad.left - pad.right;
   const ch = height - pad.top - pad.bottom;
+  const volHeight = ch * 0.18; // volume bars take bottom 18% of chart area
 
   const chart = useMemo(() => {
     if (!data || data.length < 2) return null;
@@ -110,7 +101,6 @@ export default function SpikeChart({
     const area = `${line}L${sx(data.length - 1)},${pad.top + ch}L${sx(0)},${pad.top + ch}Z`;
 
     let spikes = showSpikes ? detectSpikes(data, spikeThreshold) : [];
-    // Attach per-spike attributors + compute dates
     spikes = spikes.map((s, i) => ({
       ...s,
       attributors: spikeAttributors?.[i] || defaultAttributors || [],
@@ -120,34 +110,39 @@ export default function SpikeChart({
 
     const yTicks: { y: number; label: string }[] = [];
     const step = pRange <= 0.15 ? 0.05 : 0.10;
-    for (let v = pMin; v <= pMax + 0.001; v += step) {
-      yTicks.push({ y: sy(v), label: `${Math.round(v * 100)}%` });
-    }
+    for (let v = pMin; v <= pMax + 0.001; v += step) yTicks.push({ y: sy(v), label: `${Math.round(v * 100)}%` });
 
     const endMs = lastUpdated ? new Date(lastUpdated).getTime() : Date.now();
     const xTicks: { x: number; label: string }[] = [];
     for (let i = 0; i <= 5; i++) {
       const idx = Math.round((i / 5) * (data.length - 1));
       const daysAgo = totalDays * (1 - idx / (data.length - 1));
-      const d = new Date(endMs - daysAgo * 86400000);
-      xTicks.push({ x: sx(idx), label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
+      xTicks.push({ x: sx(idx), label: new Date(endMs - daysAgo * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
     }
 
-    return { line, area, spikes, yTicks, xTicks, sx, sy, pMin, pMax };
-  }, [data, cw, ch, showSpikes, spikeThreshold, pad, spikeAttributors, defaultAttributors, totalDays, lastUpdated]);
+    // Volume bars
+    const volMax = volumeData ? Math.max(...volumeData, 1) : 1;
+    const barW = Math.max(cw / data.length - 0.5, 1);
+
+    // Cumulative volume
+    let cumVol: number[] = [];
+    if (volumeData) {
+      let sum = 0;
+      cumVol = volumeData.map(v => { sum += v; return sum; });
+    }
+
+    return { line, area, spikes, yTicks, xTicks, sx, sy, pMin, pMax, volMax, barW, cumVol };
+  }, [data, volumeData, cw, ch, showSpikes, spikeThreshold, pad, spikeAttributors, defaultAttributors, totalDays, lastUpdated]);
 
   const handleMM = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || !data || pinnedSpikeIdx !== null) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const scale = width / rect.width;
-    const svgX = (e.clientX - rect.left) * scale;
+    const svgX = (e.clientX - rect.left) * (width / rect.width);
     const rel = (svgX - pad.left) / cw;
     const idx = Math.round(Math.max(0, Math.min(1, rel)) * (data.length - 1));
     setCursor({ x: svgX, idx });
-    if (chart) {
-      const found = chart.spikes.findIndex(s => idx >= s.startIdx && idx <= s.endIdx);
-      setHoveredSpikeIdx(found >= 0 ? found : null);
-    } else setHoveredSpikeIdx(null);
+    if (chart) { const f = chart.spikes.findIndex(s => idx >= s.startIdx && idx <= s.endIdx); setHoveredSpikeIdx(f >= 0 ? f : null); }
+    else setHoveredSpikeIdx(null);
   }, [data, cw, pad.left, chart, width, pinnedSpikeIdx]);
 
   const handleClick = useCallback(() => {
@@ -160,6 +155,8 @@ export default function SpikeChart({
 
   const cv = cursor ? data[cursor.idx] : null;
   const cd = cursor ? idxToDate(cursor.idx, data.length, totalDays, lastUpdated) : null;
+  const curVol = cursor && volumeData ? volumeData[cursor.idx] : null;
+  const curCumVol = cursor && chart.cumVol.length ? chart.cumVol[cursor.idx] : null;
   const activeSI = pinnedSpikeIdx ?? hoveredSpikeIdx;
   const activeSpike = activeSI !== null ? chart.spikes[activeSI] : null;
 
@@ -171,28 +168,34 @@ export default function SpikeChart({
         onMouseLeave={interactive && pinnedSpikeIdx === null ? () => { setCursor(null); setHoveredSpikeIdx(null); } : undefined}
         onClick={interactive ? handleClick : undefined}>
 
+        {/* Y-axis right */}
         {chart.yTicks.map((t, i) => (
           <g key={i}>
             <line x1={pad.left} y1={t.y} x2={width - pad.right} y2={t.y} stroke="#e8e6dc" strokeDasharray="3,5" />
-            <text x={width - pad.right + 6} y={t.y + 4} textAnchor="start" fill="#b0aea5"
-              fontSize={11} fontFamily="'JetBrains Mono', monospace" fontWeight={500}>{t.label}</text>
+            <text x={width - pad.right + 6} y={t.y + 4} textAnchor="start" fill="#b0aea5" fontSize={11} fontFamily="'JetBrains Mono', monospace" fontWeight={500}>{t.label}</text>
           </g>
         ))}
 
+        {/* X-axis */}
         <line x1={pad.left} y1={pad.top + ch} x2={width - pad.right} y2={pad.top + ch} stroke="#d5d3c9" strokeWidth={1} />
         {chart.xTicks.map((t, i) => (
-          <text key={i} x={t.x} y={pad.top + ch + 16} textAnchor="middle" fill="#b0aea5"
-            fontSize={10} fontFamily="'Source Serif 4', serif">{t.label}</text>
+          <text key={i} x={t.x} y={pad.top + ch + 14} textAnchor="middle" fill="#b0aea5" fontSize={10} fontFamily="'Source Serif 4', serif">{t.label}</text>
         ))}
 
+        {/* Volume bars — light background, bottom of chart */}
+        {volumeData && volumeData.map((v, i) => {
+          const barH = (v / chart.volMax) * volHeight;
+          const x = chart.sx(i) - chart.barW / 2;
+          return <rect key={`v-${i}`} x={x} y={pad.top + ch - barH} width={chart.barW} height={barH}
+            fill="rgba(217,119,87,0.08)" rx={0.5} />;
+        })}
+
+        {/* Spike shaded regions with P/- markers */}
         {chart.spikes.map((s, i) => {
-          const x1 = chart.sx(s.startIdx), x2 = chart.sx(s.endIdx);
-          const midX = (x1 + x2) / 2;
-          const up = s.direction === 'up';
-          const isA = i === activeSI;
+          const x1 = chart.sx(s.startIdx), x2 = chart.sx(s.endIdx), midX = (x1 + x2) / 2;
+          const up = s.direction === 'up', isA = i === activeSI;
           const hasAttr = s.attributors && s.attributors.length > 0;
-          const markerLabel = hasAttr ? 'P' : '–';
-          const markerBg = hasAttr ? '#d97757' : '#b0aea5';
+          const mBg = hasAttr ? '#d97757' : '#b0aea5';
           return (
             <g key={`s-${i}`} style={{ cursor: interactive ? 'pointer' : 'default' }}
               onClick={interactive ? (e) => { e.stopPropagation(); setPinnedSpikeIdx(pinnedSpikeIdx === i ? null : i); } : undefined}>
@@ -200,23 +203,20 @@ export default function SpikeChart({
                 fill={up ? `rgba(120,140,93,${isA ? 0.18 : 0.10})` : `rgba(196,69,54,${isA ? 0.18 : 0.10})`} rx={2} />
               <line x1={x1} y1={pad.top} x2={x1} y2={pad.top + ch} stroke={up ? 'rgba(120,140,93,0.4)' : 'rgba(196,69,54,0.4)'} strokeWidth={isA ? 1.5 : 1} />
               <line x1={x2} y1={pad.top} x2={x2} y2={pad.top + ch} stroke={up ? 'rgba(120,140,93,0.4)' : 'rgba(196,69,54,0.4)'} strokeWidth={isA ? 1.5 : 1} />
-              {/* P / – marker at top-center */}
-              <circle cx={midX} cy={pad.top - 1} r={8}
-                fill={isA ? markerBg : 'white'} stroke={markerBg} strokeWidth={1.5} />
-              <text x={midX} y={pad.top + 3} textAnchor="middle"
-                fill={isA ? 'white' : markerBg}
-                fontSize={hasAttr ? 9 : 11} fontWeight={700}
-                fontFamily="'JetBrains Mono', monospace"
-                style={{ pointerEvents: 'none' }}>
-                {markerLabel}
+              <circle cx={midX} cy={pad.top - 1} r={8} fill={isA ? mBg : 'white'} stroke={mBg} strokeWidth={1.5} />
+              <text x={midX} y={pad.top + 3} textAnchor="middle" fill={isA ? 'white' : mBg}
+                fontSize={hasAttr ? 9 : 11} fontWeight={700} fontFamily="'JetBrains Mono', monospace" style={{ pointerEvents: 'none' }}>
+                {hasAttr ? 'P' : '–'}
               </text>
             </g>
           );
         })}
 
+        {/* Area + line */}
         <path d={chart.area} fill="rgba(217,119,87,0.06)" />
         <path d={chart.line} fill="none" stroke={C} strokeWidth={1.8} strokeLinejoin="round" />
 
+        {/* Crosshair */}
         {interactive && cursor && cv !== null && pinnedSpikeIdx === null && (
           <>
             <line x1={cursor.x} y1={pad.top} x2={cursor.x} y2={pad.top + ch} stroke="#141413" strokeWidth={0.8} />
@@ -225,21 +225,29 @@ export default function SpikeChart({
         )}
       </svg>
 
+      {/* Crosshair readout — price + volume */}
       {interactive && cursor && cv !== null && pinnedSpikeIdx === null && (
         <div style={{
-          position: 'absolute', left: Math.min(Math.max((cursor.x / width) * 100, 3), 72) + '%',
+          position: 'absolute', left: Math.min(Math.max((cursor.x / width) * 100, 3), 68) + '%',
           top: 0, background: 'white', border: '1px solid #e8e6dc', borderRadius: 6,
           padding: '4px 10px', fontSize: 11, boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
           pointerEvents: 'none', zIndex: 10, whiteSpace: 'nowrap',
         }}>
           <div style={{ color: '#b0aea5', marginBottom: 2 }}>{cd}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: C, display: 'inline-block' }} />
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: C, display: 'inline-block' }} />
             <span style={{ fontWeight: 700, color: '#141413', fontFamily: "'JetBrains Mono', monospace" }}>{(cv * 100).toFixed(1)}%</span>
           </div>
+          {curVol !== null && (
+            <div style={{ display: 'flex', gap: 10, marginTop: 2, color: '#b0aea5', fontFamily: "'JetBrains Mono', monospace" }}>
+              <span>Vol {fmtVol(curVol)}</span>
+              {curCumVol !== null && <span>Cum {fmtVol(curCumVol)}</span>}
+            </div>
+          )}
         </div>
       )}
 
+      {/* Spike popup */}
       {interactive && activeSpike && (
         <div style={{
           position: 'absolute',
@@ -254,12 +262,7 @@ export default function SpikeChart({
             <button onClick={(e) => { e.stopPropagation(); setPinnedSpikeIdx(null); }}
               style={{ position: 'absolute', top: 8, right: 10, background: 'none', border: 'none', color: '#b0aea5', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>✕</button>
           )}
-
-          {/* Spike time range */}
-          <div style={{ fontSize: 11, color: '#b0aea5', marginBottom: 8, paddingRight: 20 }}>
-            {activeSpike.startDate} → {activeSpike.endDate}
-          </div>
-
+          <div style={{ fontSize: 11, color: '#b0aea5', marginBottom: 8, paddingRight: 20 }}>{activeSpike.startDate} → {activeSpike.endDate}</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
             <span style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Duration</span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>{fmtDur(activeSpike.durationPoints, data.length, totalDays * 24)}</span>
@@ -274,7 +277,6 @@ export default function SpikeChart({
             <span style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Range</span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{(activeSpike.priceBefore * 100).toFixed(1)}% → {(activeSpike.priceAfter * 100).toFixed(1)}%</span>
           </div>
-
           {activeSpike.attributors.length > 0 ? (
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
               <div style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Probable Causes</div>

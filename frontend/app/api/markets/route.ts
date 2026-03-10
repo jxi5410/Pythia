@@ -54,6 +54,26 @@ function genHistory(current: number, previous: number, points: number = 200): nu
   return history;
 }
 
+// Generate realistic volume history — correlated with price moves (spikes = high volume)
+function genVolumeHistory(priceHistory: number[], totalVolume: number, points?: number): number[] {
+  const n = points || priceHistory.length;
+  const vol: number[] = [];
+  const avgVol = totalVolume / n;
+
+  for (let i = 0; i < n; i++) {
+    // Base volume with random variation
+    let v = avgVol * (0.3 + Math.random() * 1.4);
+    // Spike correlation: large price moves → volume spike
+    if (i > 0 && priceHistory[i] !== undefined && priceHistory[i - 1] !== undefined) {
+      const move = Math.abs(priceHistory[i] - priceHistory[i - 1]);
+      if (move > 0.02) v *= 2.5 + Math.random() * 2;
+      else if (move > 0.01) v *= 1.5 + Math.random();
+    }
+    vol.push(Math.round(v));
+  }
+  return vol;
+}
+
 // Mock signal data linked to specific markets
 const marketSignals: Record<string, {
   id: string;
@@ -431,16 +451,20 @@ export async function GET(request: Request) {
       );
     }
 
-    const marketsWithData = filtered.map(m => ({
-      ...m,
-      probabilityHistory: genHistory(m.probability, m.previousProbability),
-      signal: marketSignals[m.id] || null,
-      spikeAttributors: perSpikeAttributors[m.id] || {
-        0: [{ name: 'Market sentiment shift', confidence: 0.45 }],
-        1: [{ name: 'Volume anomaly detected', confidence: 0.32 }],
-      },
-      dataSource: 'mock' as const,
-    }));
+    const marketsWithData = filtered.map(m => {
+      const priceHist = genHistory(m.probability, m.previousProbability);
+      return {
+        ...m,
+        probabilityHistory: priceHist,
+        volumeHistory: genVolumeHistory(priceHist, m.totalVolume),
+        signal: marketSignals[m.id] || null,
+        spikeAttributors: perSpikeAttributors[m.id] || {
+          0: [{ name: 'Market sentiment shift', confidence: 0.45 }],
+          1: [{ name: 'Volume anomaly detected', confidence: 0.32 }],
+        },
+        dataSource: 'mock' as const,
+      };
+    });
 
     // Signal-triggered markets float to top
     marketsWithData.sort((a, b) => {

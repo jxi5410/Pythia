@@ -9,6 +9,7 @@ interface MarketData {
   previousProbability: number; volume24h: number; totalVolume: number;
   liquidity: number; endDate: string; source: string; sourceUrl: string;
   trending: boolean; tags: string[]; probabilityHistory: number[];
+  volumeHistory?: number[];
   dataSource?: string; signal?: any;
   spikeAttributors?: Record<number, SpikeAttributor[]>;
 }
@@ -120,7 +121,7 @@ function LivePulse() {
 // ================================================================
 // Hero Panel
 // ================================================================
-const HERO_H = 500;
+const HERO_H = 480;
 
 function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, bookmarked, onBookmark, onShare, lastUpdated }: {
   market: MarketData; index: number; total: number;
@@ -141,7 +142,7 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
         height: HERO_H, minHeight: HERO_H, maxHeight: HERO_H,
       }}>
         {/* Category + live indicator + icons */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px 0', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 22px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>{CAT_LABELS[market.category] || market.category}</span>
           </div>
@@ -152,7 +153,7 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
         </div>
 
         {/* Title */}
-        <div style={{ padding: '6px 22px 0', flexShrink: 0, textAlign: 'left' }}>
+        <div style={{ padding: '4px 22px 0', flexShrink: 0, textAlign: 'left' }}>
           <div style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.2, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textAlign: 'left' }}>
             {market.question}
           </div>
@@ -196,7 +197,7 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
           {/* Right: chart */}
           <div style={{ flex: 1, padding: '12px 16px 14px 0', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'visible' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <SpikeChart data={market.probabilityHistory} height={330} width={860}
+              <SpikeChart data={market.probabilityHistory} volumeData={market.volumeHistory} height={330} width={860}
                 showSpikes spikeThreshold={0.035} interactive
                 spikeAttributors={market.spikeAttributors}
                 lastUpdated={lastUpdated} />
@@ -204,10 +205,10 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
           </div>
         </div>
 
-        {/* Nav row — INSIDE panel at bottom, above rounded corners */}
+        {/* Nav row — inside panel bottom */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '6px 22px 12px', borderTop: '1px solid var(--border-subtle)',
+          padding: '4px 22px 10px', borderTop: '1px solid var(--border-subtle)',
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -215,9 +216,10 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
               <span key={i} style={{ width: i === index ? 22 : 7, height: 7, borderRadius: 4, background: i === index ? NO_C : 'var(--border-default)', transition: 'width 0.3s, background 0.3s' }} />
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 24 }}>
-            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 280, flexShrink: 0 }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
-            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 280, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span>›</span></button>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px 0 0', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 270, flexShrink: 0 }}><span style={{ fontSize: 18, lineHeight: 1 }}>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
+            {prevName && nextName && <span style={{ width: 1, height: 16, background: 'var(--border-default)', flexShrink: 0 }} />}
+            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: '0 0 0 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 270, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span style={{ fontSize: 18, lineHeight: 1 }}>›</span></button>}
           </div>
         </div>
       </div>
