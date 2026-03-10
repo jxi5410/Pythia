@@ -1,128 +1,238 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import SpikeChart from '@/components/SpikeChart';
-import type { Market, Spike, Attributor, ForwardSignal, Narrative } from '@/types';
-import { MARKET_CATEGORIES } from '@/types';
 
 // ================================================================
-// API helpers
+// Types (inline to avoid import issues with existing types file)
 // ================================================================
-const API = '/api/v1';
+interface MarketData {
+  id: string;
+  question: string;
+  category: string;
+  probability: number;
+  previousProbability: number;
+  volume24h: number;
+  totalVolume: number;
+  liquidity: number;
+  endDate: string;
+  source: string;
+  sourceUrl: string;
+  trending: boolean;
+  tags: string[];
+  probabilityHistory: number[];
+  dataSource?: string;
+  signal?: any;
+}
 
-async function fetchJson<T>(url: string): Promise<T | null> {
-  try { const r = await fetch(url); return r.ok ? r.json() : null; } catch { return null; }
+const CATEGORIES = [
+  { id: 'all', label: 'Trending' },
+  { id: 'fed', label: 'Politics' },
+  { id: 'crypto', label: 'Crypto' },
+  { id: 'tariffs', label: 'Trade' },
+  { id: 'geopolitical', label: 'World' },
+  { id: 'defense', label: 'Defense' },
+];
+
+// ================================================================
+// Helpers
+// ================================================================
+
+function fmtCurrency(v: number): string {
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e3) return `$${Math.round(v / 1e3).toLocaleString()}K`;
+  return `$${v}`;
+}
+
+function fmtDaysLeft(d: string): string {
+  const days = Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / 86400000));
+  if (days === 0) return 'Ends today';
+  if (days === 1) return '1 day left';
+  return `${days}d left`;
+}
+
+function changePp(curr: number, prev: number): number {
+  return (curr - prev) * 100;
 }
 
 // ================================================================
-// Mock data for demo (replace with live API once backend serves markets)
-// ================================================================
-function generateMockMarkets(): Market[] {
-  const markets: Market[] = [
-    { id: 'fed-rate-cut-june', question: 'Will the Fed cut rates by June 2026?', category: 'economics', probability: 0.42, previousProbability: 0.38, volume24h: 890000, totalVolume: 15600000, liquidity: 4200000, endDate: '2026-06-30', source: 'polymarket', sourceUrl: '', trending: true, tags: ['macro', 'fed'], probabilityHistory: [0.35, 0.37, 0.38, 0.42, 0.40, 0.38, 0.42], dataSource: 'mock' },
-    { id: 'iran-war-march', question: 'Will Iran conflict escalate before April 2026?', category: 'geopolitical', probability: 0.23, previousProbability: 0.18, volume24h: 560000, totalVolume: 8900000, liquidity: 1800000, endDate: '2026-04-01', source: 'polymarket', sourceUrl: '', trending: true, tags: ['geopolitical', 'conflict'], probabilityHistory: [0.12, 0.15, 0.18, 0.23, 0.20, 0.18, 0.23], dataSource: 'mock' },
-    { id: 'btc-150k-march', question: 'Bitcoin above $150K in March?', category: 'crypto', probability: 0.08, previousProbability: 0.12, volume24h: 340000, totalVolume: 5200000, liquidity: 890000, endDate: '2026-03-31', source: 'polymarket', sourceUrl: '', trending: false, tags: ['crypto', 'bitcoin'], probabilityHistory: [0.15, 0.12, 0.10, 0.08, 0.09, 0.12, 0.08], dataSource: 'mock' },
-    { id: 'trump-greenland', question: 'Will Trump acquire Greenland before 2027?', category: 'politics', probability: 0.11, previousProbability: 0.09, volume24h: 210000, totalVolume: 3100000, liquidity: 620000, endDate: '2027-01-01', source: 'polymarket', sourceUrl: '', trending: false, tags: ['politics', 'us'], probabilityHistory: [0.08, 0.09, 0.10, 0.11, 0.10, 0.09, 0.11], dataSource: 'mock' },
-    { id: 'russia-ukraine-ceasefire', question: 'Russia-Ukraine ceasefire by end of 2026?', category: 'geopolitical', probability: 0.40, previousProbability: 0.35, volume24h: 420000, totalVolume: 7200000, liquidity: 1200000, endDate: '2026-12-31', source: 'polymarket', sourceUrl: '', trending: true, tags: ['geopolitical', 'conflict'], probabilityHistory: [0.30, 0.32, 0.35, 0.40, 0.38, 0.35, 0.40], dataSource: 'mock' },
-    { id: 'aliens-2027', question: 'Will the US confirm aliens exist before 2027?', category: 'politics', probability: 0.18, previousProbability: 0.14, volume24h: 180000, totalVolume: 4500000, liquidity: 950000, endDate: '2027-01-01', source: 'polymarket', sourceUrl: '', trending: true, tags: ['politics', 'us'], probabilityHistory: [0.10, 0.12, 0.14, 0.18, 0.16, 0.14, 0.18], dataSource: 'mock' },
-    { id: 'newsom-2028', question: 'Will Gavin Newsom win the 2028 Democratic nomination?', category: 'politics', probability: 0.25, previousProbability: 0.22, volume24h: 150000, totalVolume: 2800000, liquidity: 520000, endDate: '2028-08-31', source: 'polymarket', sourceUrl: '', trending: false, tags: ['politics', 'election'], probabilityHistory: [0.20, 0.21, 0.22, 0.25, 0.23, 0.22, 0.25], dataSource: 'mock' },
-    { id: 'colorado-stanley', question: 'Will Colorado Avalanche win 2026 Stanley Cup?', category: 'sports', probability: 0.25, previousProbability: 0.22, volume24h: 95000, totalVolume: 1200000, liquidity: 380000, endDate: '2026-06-30', source: 'polymarket', sourceUrl: '', trending: false, tags: ['sports', 'nhl'], probabilityHistory: [0.18, 0.20, 0.22, 0.25, 0.24, 0.22, 0.25], dataSource: 'mock' },
-  ];
-  return markets.sort((a, b) => b.liquidity - a.liquidity);
-}
-
-// ================================================================
-// Sub-components
+// Hero Panel — Kalshi-style featured market with full chart
 // ================================================================
 
-function MiniChart({ data, positive }: { data: number[]; positive: boolean }) {
-  if (!data || data.length < 2) return null;
-  const h = 48, w = 120;
-  const mn = Math.min(...data), mx = Math.max(...data);
-  const range = mx - mn || 0.01;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - mn) / range) * h}`);
-  const color = positive ? 'var(--positive)' : 'var(--negative)';
+function HeroPanel({ market, index, total, onPrev, onNext }: {
+  market: MarketData; index: number; total: number;
+  onPrev: () => void; onNext: () => void;
+}) {
+  const change = changePp(market.probability, market.previousProbability);
+  const pos = change >= 0;
+  const paysYes = market.probability > 0 ? (1 / market.probability).toFixed(2) : '—';
+  const paysNo = market.probability < 1 ? (1 / (1 - market.probability)).toFixed(2) : '—';
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: h }}>
-      <path d={`M${pts.join('L')}L${w},${h}L0,${h}Z`} fill={color} fillOpacity={0.06} />
-      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function HeroCarousel({ markets, onSelect }: { markets: Market[]; onSelect: (m: Market) => void }) {
-  const [idx, setIdx] = useState(0);
-  const featured = markets.filter(m => m.trending).slice(0, 6);
-
-  useEffect(() => {
-    if (featured.length <= 1) return;
-    const timer = setInterval(() => setIdx(i => (i + 1) % featured.length), 5000);
-    return () => clearInterval(timer);
-  }, [featured.length]);
-
-  if (!featured.length) return null;
-  const m = featured[idx];
-  const change = ((m.probability - m.previousProbability) * 100);
-  const positive = change >= 0;
-
-  return (
-    <div className="hero-panel" style={{ flexDirection: 'column', alignItems: 'stretch', cursor: 'pointer' }} onClick={() => onSelect(m)}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
-        <div style={{ flex: 1 }}>
-          <div className="hero-kicker">Featured Market</div>
-          <div style={{ fontSize: 'clamp(1.4rem, 3.5vw, 2.2rem)', lineHeight: 1.1, letterSpacing: '-0.04em', fontWeight: 700, color: 'var(--text-primary)' }}>
-            {m.question}
+    <div className="hero-panel" style={{ flexDirection: 'row', padding: 0, overflow: 'hidden' }}>
+      {/* Left side — market info */}
+      <div style={{ flex: '0 0 42%', padding: '28px 28px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.04em', lineHeight: 1.15, color: 'var(--text-primary)', marginBottom: 16 }}>
+            {market.question}
           </div>
-          <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span className="venue-chip">{m.source}</span>
-            <span className="venue-chip">{m.category}</span>
-            {m.dataSource === 'mock' && <span className="venue-chip" style={{ color: 'var(--warning)' }}>Demo</span>}
+
+          {/* Yes/No pricing table */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
+            <thead>
+              <tr style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <td style={{ padding: '0 0 8px' }}>Market</td>
+                <td style={{ padding: '0 0 8px', textAlign: 'right' }}>Pays out</td>
+                <td style={{ padding: '0 0 8px', textAlign: 'right' }}>Odds</td>
+              </tr>
+            </thead>
+            <tbody style={{ fontSize: 15, fontWeight: 600 }}>
+              <tr>
+                <td style={{ padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ color: 'var(--positive)' }}>Yes</span>
+                  <div style={{ height: 3, width: `${market.probability * 100}%`, background: 'var(--positive)', borderRadius: 2, marginTop: 4 }} />
+                </td>
+                <td style={{ padding: '8px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)' }}>{paysYes}x</td>
+                <td style={{ padding: '8px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ border: '1.5px solid var(--positive)', borderRadius: 6, padding: '4px 12px', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                    {(market.probability * 100).toFixed(0)}%
+                  </span>
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: '8px 0', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ color: 'var(--accent)' }}>No</span>
+                  <div style={{ height: 3, width: `${(1 - market.probability) * 100}%`, background: 'var(--accent)', borderRadius: 2, marginTop: 4 }} />
+                </td>
+                <td style={{ padding: '8px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)' }}>{paysNo}x</td>
+                <td style={{ padding: '8px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ border: '1.5px solid var(--border-default)', borderRadius: 6, padding: '4px 12px', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                    {((1 - market.probability) * 100).toFixed(0)}%
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            {fmtCurrency(market.volume24h)} vol · {fmtDaysLeft(market.endDate)}
           </div>
+
+          {/* Signal badge if active */}
+          {market.signal && (
+            <div style={{ padding: '10px 14px', background: 'var(--info-muted)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: 'var(--radius-sm)', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--info)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                ⚡ Pythia Signal — {market.signal.severity?.toUpperCase()}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                {market.signal.event} · {market.signal.confluenceLayers}/{market.signal.totalLayers} layers
+              </div>
+            </div>
+          )}
         </div>
-        <div style={{ textAlign: 'right', minWidth: 140 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 42, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text-primary)' }}>
-            {(m.probability * 100).toFixed(0)}%
-          </div>
-          <div className={`price-move ${positive ? 'price-up' : 'price-down'}`} style={{ fontSize: 14 }}>
-            {positive ? '+' : ''}{change.toFixed(1)}pp
-          </div>
-          <div style={{ marginTop: 8 }}><MiniChart data={m.probabilityHistory} positive={positive} /></div>
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          <span className="venue-chip">{market.source}</span>
+          {market.tags.slice(0, 2).map(t => <span key={t} className="layer-tag">{t}</span>)}
+          {market.dataSource === 'mock' && <span className="layer-tag" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }}>Demo</span>}
         </div>
       </div>
 
-      {/* Carousel dots */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 14 }}>
-        {featured.map((_, i) => (
-          <button key={i} onClick={(e) => { e.stopPropagation(); setIdx(i); }}
-            style={{ width: i === idx ? 20 : 6, height: 6, borderRadius: 3, border: 'none', cursor: 'pointer',
-              background: i === idx ? 'var(--accent)' : 'var(--border-default)', transition: 'all 0.3s ease' }} />
-        ))}
+      {/* Right side — full chart */}
+      <div style={{ flex: 1, padding: '20px 28px 20px 0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        {/* Carousel controls + current price */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>●</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fmtDaysLeft(market.endDate)}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {(market.probability * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{index + 1} of {total}</span>
+            <button onClick={onPrev} style={{
+              width: 32, height: 32, borderRadius: '50%', border: '1px solid var(--border-default)',
+              background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: 14, color: 'var(--text-secondary)',
+            }}>‹</button>
+            <button onClick={onNext} style={{
+              width: 32, height: 32, borderRadius: '50%', border: '1.5px solid var(--accent)',
+              background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: 14, color: 'var(--accent)',
+            }}>›</button>
+          </div>
+        </div>
+
+        {/* Chart */}
+        <div style={{ flex: 1, minHeight: 180 }}>
+          <SpikeChart
+            data={market.probabilityHistory}
+            height={200}
+            width={580}
+            showSpikes={true}
+            spikeThreshold={0.04}
+            positive={pos}
+            interactive={true}
+          />
+        </div>
+
+        {/* Chart footer */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>30d history</span>
+          <span className={`price-move ${pos ? 'price-up' : 'price-down'}`} style={{ fontSize: 13, fontWeight: 700 }}>
+            {pos ? '+' : ''}{change.toFixed(1)}pp
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
-function MarketCard({ market, onClick }: { market: Market; onClick: () => void }) {
-  const change = (market.probability - market.previousProbability) * 100;
-  const positive = change >= 0;
+// ================================================================
+// Market Card — compact card with chart + yes/no pricing
+// ================================================================
+
+function MarketCard({ market, onClick }: { market: MarketData; onClick: () => void }) {
+  const change = changePp(market.probability, market.previousProbability);
+  const pos = change >= 0;
+
   return (
     <div className="exchange-card" onClick={onClick} style={{ cursor: 'pointer' }}>
+      {/* Header */}
       <div className="exchange-card-header">
-        <div style={{ display: 'flex', gap: 6 }}>
-          <span className="venue-chip">{market.source}</span>
-          {market.trending && <span className="signal-chip"><span className="signal-chip-dot" />Active</span>}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span className="venue-chip">{market.source.toUpperCase()}</span>
+          {market.signal && (
+            <span className="signal-chip"><span className="signal-chip-dot" />SIGNAL</span>
+          )}
         </div>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtDaysLeft(market.endDate)}</span>
       </div>
-      <div style={{ fontSize: 16, fontWeight: 650, letterSpacing: '-0.02em', lineHeight: 1.25, minHeight: 44, marginBottom: 10, color: 'var(--text-primary)' }}>
+
+      {/* Question */}
+      <div style={{ fontSize: 17, fontWeight: 660, letterSpacing: '-0.02em', lineHeight: 1.25, color: 'var(--text-primary)', minHeight: 50, marginBottom: 10 }}>
         {market.question}
       </div>
+
+      {/* Chart with spikes */}
       <div className="chart-shell">
-        <MiniChart data={market.probabilityHistory} positive={positive} />
+        <SpikeChart
+          data={market.probabilityHistory}
+          height={96}
+          width={400}
+          showSpikes={true}
+          spikeThreshold={0.04}
+          positive={pos}
+          interactive={false}
+        />
         <div className="chart-meta-row" style={{ marginTop: 4 }}>
-          <span className="meta-mono">${(market.volume24h / 1000).toFixed(0)}K vol</span>
-          <span className={`price-move ${positive ? 'price-up' : 'price-down'}`}>{positive ? '+' : ''}{change.toFixed(1)}pp</span>
+          <span className="meta-mono">{fmtCurrency(market.volume24h)} vol</span>
+          <span className={`price-move ${pos ? 'price-up' : 'price-down'}`}>{pos ? '+' : ''}{change.toFixed(1)}pp</span>
         </div>
       </div>
+
+      {/* Yes / No pricing */}
       <div className="price-row" style={{ marginTop: 10 }}>
         <div className="price-box price-box-yes">
           <span className="price-label">Yes</span>
@@ -133,393 +243,206 @@ function MarketCard({ market, onClick }: { market: Market; onClick: () => void }
           <span className="price-value">{((1 - market.probability) * 100).toFixed(0)}¢</span>
         </div>
       </div>
+
+      {/* Tags */}
       <div className="card-foot">
-        <span className="layer-tag">${(market.liquidity / 1e6).toFixed(1)}M liq</span>
+        <span className="layer-tag">{fmtCurrency(market.liquidity)} liq</span>
         {market.tags.slice(0, 2).map(t => <span key={t} className="layer-tag">{t}</span>)}
       </div>
-    </div>
-  );
-}
 
-function AttributorModal({ attributor, onClose, onSave }: { attributor: Attributor; onClose: () => void; onSave: (a: Attributor) => void }) {
-  const [signals, setSignals] = useState<ForwardSignal[]>([]);
-  useEffect(() => {
-    fetchJson<ForwardSignal[]>(`${API}/signals/forward?min_confidence=0`).then(d => setSignals(d || []));
-  }, []);
-
-  const relevantSignals = signals.filter(s => s.attributor_id === attributor.id);
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={onClose}>
-      <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: 28, maxWidth: 560, width: '90%', maxHeight: '80vh', overflow: 'auto', boxShadow: 'var(--shadow-lg)' }}
-        onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>{attributor.name}</div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              <span className={`severity-badge severity-badge-${attributor.confidence === 'HIGH' ? 'critical' : attributor.confidence === 'MEDIUM' ? 'high' : 'low'}`}>{attributor.confidence}</span>
-              <span className="layer-tag">{attributor.category}</span>
-              <span className="layer-tag">{attributor.status}</span>
+      {/* Signal strip if present */}
+      {market.signal && (
+        <div className="edge-strip">
+          <div className="edge-strip-head">
+            <span className="edge-title">⚡ {market.signal.event}</span>
+            <span className={`severity-badge severity-badge-${market.signal.severity}`}>{market.signal.severity?.toUpperCase()}</span>
+          </div>
+          <div className="edge-strip-grid">
+            <div>
+              <div className="edge-kicker">Confidence</div>
+              <div className="edge-value">{((market.signal.confidenceScore || 0) * 100).toFixed(0)}%</div>
+            </div>
+            <div>
+              <div className="edge-kicker">Layers</div>
+              <div className="edge-value">{market.signal.confluenceLayers}/{market.signal.totalLayers}</div>
+            </div>
+            <div>
+              <div className="edge-kicker">Edge</div>
+              <div className="edge-value">{market.signal.edgeWindow}</div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
-        </div>
-
-        {/* Causal chain */}
-        {attributor.causal_chain && (
-          <div className="section-card" style={{ marginBottom: 14 }}>
-            <div className="data-label" style={{ marginBottom: 6 }}>Causal Chain</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{attributor.causal_chain}</div>
-          </div>
-        )}
-
-        {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
-          <div className="metric-cell"><div className="data-label">Spikes</div><div className="data-value">{attributor.spike_count}</div></div>
-          <div className="metric-cell"><div className="data-label">Avg Move</div><div className="data-value">{(attributor.avg_magnitude * 100).toFixed(1)}%</div></div>
-          <div className="metric-cell"><div className="data-label">Confidence</div><div className="data-value">{((attributor.confidence_score || 0) * 100).toFixed(0)}%</div></div>
-        </div>
-
-        {/* Forward signals from this attributor */}
-        {relevantSignals.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div className="data-label" style={{ marginBottom: 8 }}>Forward Signals</div>
-            {relevantSignals.slice(0, 5).map(s => (
-              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 12 }}>
-                <span style={{ color: s.predicted_direction === 'up' ? 'var(--positive)' : 'var(--negative)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                  {s.predicted_direction === 'up' ? '▲' : '▼'} {(s.predicted_magnitude * 100).toFixed(1)}%
+          {market.signal.assetImpact && (
+            <div className="layer-inline-list">
+              {market.signal.assetImpact.slice(0, 3).map((a: any, i: number) => (
+                <span key={i} className="layer-inline-item">
+                  {a.asset} {a.expectedMove}
                 </span>
-                <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{s.target_market_title?.slice(0, 40)}</span>
-                <span style={{ color: 'var(--text-muted)' }}>~{s.predicted_lag_hours}h</span>
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{(s.confidence_score * 100).toFixed(0)}%</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-primary" onClick={() => onSave(attributor)}>
-            ★ Save to Narratives
-          </button>
-          <button className="btn-primary" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
-            onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SearchBar({ onSearch }: { onSearch: (q: string) => void }) {
-  const [query, setQuery] = useState('');
-  return (
-    <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
-      <input value={query}
-        onChange={e => { setQuery(e.target.value); onSearch(e.target.value); }}
-        placeholder='Search events... e.g. "Will Iran war end by March 2026"'
-        style={{
-          width: '100%', padding: '10px 14px 10px 36px', borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', fontSize: 13,
-          color: 'var(--text-primary)', outline: 'none',
-        }}
-      />
-      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 14 }}>⌕</span>
-    </div>
-  );
-}
-
-function PreferencesPanel({ onClose }: { onClose: () => void }) {
-  const [spikeThresh, setSpikeThresh] = useState(2);
-  const [attrConf, setAttrConf] = useState(50);
-  const [sigConf, setSigConf] = useState(40);
-
-  const save = () => {
-    fetch(`${API}/preferences/thresholds`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        spike_detection: spikeThresh / 100,
-        attribution_confidence: attrConf / 100,
-        forward_signal_confidence: sigConf / 100,
-      }),
-    });
-    onClose();
-  };
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: 28, maxWidth: 400, width: '90%', boxShadow: 'var(--shadow-lg)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: 'var(--text-primary)' }}>Preferences</div>
-
-        <label style={{ display: 'block', marginBottom: 16 }}>
-          <div className="data-label" style={{ marginBottom: 6 }}>Spike Detection Threshold: {spikeThresh}%</div>
-          <input type="range" min={1} max={20} value={spikeThresh} onChange={e => setSpikeThresh(+e.target.value)}
-            style={{ width: '100%' }} />
-        </label>
-
-        <label style={{ display: 'block', marginBottom: 16 }}>
-          <div className="data-label" style={{ marginBottom: 6 }}>Attribution Confidence: {attrConf}%</div>
-          <input type="range" min={10} max={95} value={attrConf} onChange={e => setAttrConf(+e.target.value)}
-            style={{ width: '100%' }} />
-        </label>
-
-        <label style={{ display: 'block', marginBottom: 20 }}>
-          <div className="data-label" style={{ marginBottom: 6 }}>Signal Confidence: {sigConf}%</div>
-          <input type="range" min={10} max={95} value={sigConf} onChange={e => setSigConf(+e.target.value)}
-            style={{ width: '100%' }} />
-        </label>
-
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-primary" onClick={save}>Save</button>
-          <button className="btn-primary" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }} onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AuthGate({ onAuth }: { onAuth: () => void }) {
-  const [email, setEmail] = useState('');
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  return (
-    <div className="market-shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: 36, maxWidth: 380, width: '90%', boxShadow: 'var(--shadow-lg)', textAlign: 'center' }}>
-        <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em', marginBottom: 4 }}>Pythia</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>Narrative intelligence for prediction markets</div>
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address"
-          style={{ width: '100%', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', fontSize: 14, marginBottom: 10, boxSizing: 'border-box' }} />
-        <input type="password" placeholder="Password"
-          style={{ width: '100%', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)', fontSize: 14, marginBottom: 16, boxSizing: 'border-box' }} />
-        <button className="btn-primary" style={{ width: '100%', padding: '12px 20px' }} onClick={onAuth}>
-          {mode === 'login' ? 'Sign In' : 'Create Account'}
-        </button>
-        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-muted)' }}>
-          {mode === 'login' ? (
-            <>No account? <button style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 }} onClick={() => setMode('register')}>Register</button></>
-          ) : (
-            <>Have an account? <button style={{ color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12 }} onClick={() => setMode('login')}>Sign in</button></>
+              ))}
+            </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 // ================================================================
-// Main page
+// Main Page
 // ================================================================
 
 export default function Home() {
-  const [authed, setAuthed] = useState(false);
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [narratives, setNarratives] = useState<Narrative[]>([]);
+  const [markets, setMarkets] = useState<MarketData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [heroIdx, setHeroIdx] = useState(0);
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
-  const [selectedAttributor, setSelectedAttributor] = useState<Attributor | null>(null);
-  const [showPrefs, setShowPrefs] = useState(false);
-  const [savedAttributors, setSavedAttributors] = useState<Attributor[]>([]);
-  const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'markets' | 'narratives' | 'watchlist'>('markets');
+  const [selectedMarket, setSelectedMarket] = useState<MarketData | null>(null);
+  const [dataSource, setDataSource] = useState('');
 
+  // Fetch markets from API route
   useEffect(() => {
-    // Check if user was previously authed
-    if (typeof window !== 'undefined' && window.sessionStorage?.getItem('pythia_auth')) {
-      setAuthed(true);
-    }
+    setLoading(true);
+    fetch('/api/markets?sort=volume')
+      .then(r => r.json())
+      .then(data => {
+        setMarkets(data.markets || []);
+        setDataSource(data.dataSource || '');
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
+  // Auto-rotate hero
+  const heroMarkets = markets.filter(m => m.trending || m.signal);
   useEffect(() => {
-    if (!authed) return;
-    setMarkets(generateMockMarkets());
-    fetchJson<Narrative[]>(`${API}/narratives`).then(d => { if (d) setNarratives(d); });
-  }, [authed]);
+    if (heroMarkets.length <= 1) return;
+    const timer = setInterval(() => setHeroIdx(i => (i + 1) % heroMarkets.length), 6000);
+    return () => clearInterval(timer);
+  }, [heroMarkets.length]);
 
-  const handleAuth = () => {
-    if (typeof window !== 'undefined') window.sessionStorage?.setItem('pythia_auth', '1');
-    setAuthed(true);
-  };
-
-  const saveAttributor = (a: Attributor) => {
-    setSavedAttributors(prev => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
-    setSelectedAttributor(null);
-  };
-
-  const toggleWatchlist = (marketId: string) => {
-    setWatchlist(prev => prev.includes(marketId) ? prev.filter(x => x !== marketId) : [...prev, marketId]);
-  };
-
-  if (!authed) return <AuthGate onAuth={handleAuth} />;
-
-  // Filtered markets
+  // Filter markets
   const filtered = markets.filter(m => {
     if (activeCategory !== 'all' && m.category !== activeCategory) return false;
     if (searchQuery && !m.question.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
 
-  const watchlistedMarkets = markets.filter(m => watchlist.includes(m.id));
+  // Group by category for section display
+  const categories = [...new Set(filtered.map(m => m.category))];
+
+  if (loading) {
+    return (
+      <div className="market-shell">
+        <div className="loading-shell">
+          <div className="loading-spinner" />
+          <div className="loading-text">Loading markets...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="market-shell">
-      {/* Top nav */}
-      <div style={{ maxWidth: 1180, margin: '0 auto 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.04em' }}>Pythia</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Intelligence</span>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {(['markets', 'narratives', 'watchlist'] as const).map(tab => (
-            <button key={tab} className={`filter-chip ${activeTab === tab ? 'filter-chip-active' : ''}`}
-              onClick={() => setActiveTab(tab)}>
-              {tab === 'markets' ? '◉ Markets' : tab === 'narratives' ? '📡 Narratives' : `★ Watchlist (${watchlist.length})`}
-            </button>
-          ))}
-          <button className="filter-chip" onClick={() => setShowPrefs(true)}>⚙</button>
-        </div>
-      </div>
+      {/* ── Selected market detail view ── */}
+      {selectedMarket && (
+        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+          <button onClick={() => setSelectedMarket(null)} style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)',
+            fontSize: 13, fontWeight: 600, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4,
+          }}>← Back to markets</button>
 
-      {/* ================ MARKETS TAB ================ */}
-      {activeTab === 'markets' && (
+          <HeroPanel
+            market={selectedMarket}
+            index={0}
+            total={1}
+            onPrev={() => setSelectedMarket(null)}
+            onNext={() => setSelectedMarket(null)}
+          />
+        </div>
+      )}
+
+      {/* ── Main landing ── */}
+      {!selectedMarket && (
         <>
           {/* Hero carousel */}
-          {!selectedMarket && <HeroCarousel markets={markets} onSelect={setSelectedMarket} />}
-
-          {/* Event detail view */}
-          {selectedMarket && (
-            <div style={{ maxWidth: 1180, margin: '0 auto 18px' }}>
-              <button onClick={() => setSelectedMarket(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 13, fontWeight: 600, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
-                ← Back to markets
-              </button>
-              <div className="section-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <div>
-                    <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--text-primary)' }}>{selectedMarket.question}</div>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                      <span className="venue-chip">{selectedMarket.source}</span>
-                      <span className="venue-chip">{selectedMarket.category}</span>
-                      <button className={`filter-chip ${watchlist.includes(selectedMarket.id) ? 'filter-chip-active' : ''}`}
-                        style={{ fontSize: 11, padding: '5px 10px' }}
-                        onClick={() => toggleWatchlist(selectedMarket.id)}>
-                        {watchlist.includes(selectedMarket.id) ? '★ Saved' : '☆ Watch'}
-                      </button>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 36, fontWeight: 700, color: 'var(--text-primary)' }}>
-                      {(selectedMarket.probability * 100).toFixed(0)}%
-                    </div>
-                  </div>
-                </div>
-                <SpikeChart marketId={selectedMarket.id}
-                  onSpikeClick={(s) => { /* could open spike detail */ }}
-                  onAttributorClick={setSelectedAttributor} />
-              </div>
-            </div>
+          {heroMarkets.length > 0 && (
+            <HeroPanel
+              market={heroMarkets[heroIdx % heroMarkets.length]}
+              index={heroIdx % heroMarkets.length}
+              total={heroMarkets.length}
+              onPrev={() => setHeroIdx(i => (i - 1 + heroMarkets.length) % heroMarkets.length)}
+              onNext={() => setHeroIdx(i => (i + 1) % heroMarkets.length)}
+            />
           )}
 
-          {/* Controls bar */}
-          {!selectedMarket && (
-            <>
-              <div className="control-bar">
-                <div className="filter-row">
-                  {MARKET_CATEGORIES.map(c => (
-                    <button key={c.id} className={`filter-chip ${activeCategory === c.id ? 'filter-chip-active' : ''}`}
-                      onClick={() => setActiveCategory(c.id)}>
-                      {c.icon} {c.label}
-                    </button>
-                  ))}
-                </div>
-                <SearchBar onSearch={setSearchQuery} />
-              </div>
-
-              {/* Market cards grid */}
-              <div className="cards-grid">
-                {filtered.map(m => (
-                  <MarketCard key={m.id} market={m} onClick={() => setSelectedMarket(m)} />
-                ))}
-              </div>
-
-              {filtered.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
-                  No markets match your search.
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-
-      {/* ================ NARRATIVES TAB ================ */}
-      {activeTab === 'narratives' && (
-        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 16 }}>📡 Narrative Monitoring</div>
-
-          {/* Saved attributors */}
-          {savedAttributors.length > 0 && (
-            <div className="section-card" style={{ marginBottom: 16 }}>
-              <div className="data-label" style={{ marginBottom: 10 }}>Saved Attributors</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {savedAttributors.map(a => (
-                  <button key={a.id} className="layer-tag" onClick={() => setSelectedAttributor(a)} style={{ cursor: 'pointer' }}>
-                    ★ {a.name?.slice(0, 30)} <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>{a.confidence}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* System narratives */}
-          {narratives.length > 0 ? narratives.map(n => (
-            <div key={n.id} className="exchange-card" style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 650, color: 'var(--text-primary)' }}>{n.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{n.description}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="data-value">{n.spike_count} spikes</div>
-                  <div className="data-label">strength {n.strength?.toFixed(1)}</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                <span className="layer-tag">{n.category}</span>
-                <span className="layer-tag">{n.status}</span>
-                <span className="layer-tag">{n.attributor_ids?.length || 0} attributors</span>
-              </div>
-            </div>
-          )) : (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-              No active narratives yet. Save attributors from market analysis to build your narrative monitoring dashboard.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ================ WATCHLIST TAB ================ */}
-      {activeTab === 'watchlist' && (
-        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 16 }}>★ Event Watchlist</div>
-          {watchlistedMarkets.length > 0 ? (
-            <div className="cards-grid">
-              {watchlistedMarkets.map(m => (
-                <MarketCard key={m.id} market={m} onClick={() => { setSelectedMarket(m); setActiveTab('markets'); }} />
+          {/* Category tabs + search */}
+          <div className="control-bar">
+            <div className="filter-row">
+              {CATEGORIES.map(c => (
+                <button key={c.id}
+                  className={`filter-chip ${activeCategory === c.id ? 'filter-chip-active' : ''}`}
+                  onClick={() => setActiveCategory(c.id)}>
+                  {c.label}
+                </button>
               ))}
             </div>
+            <div style={{ position: 'relative', flex: '0 1 380px' }}>
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder='Search events...'
+                style={{
+                  width: '100%', padding: '10px 14px 10px 34px', borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', fontSize: 13,
+                  color: 'var(--text-primary)', outline: 'none',
+                }}
+              />
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 13 }}>⌕</span>
+            </div>
+          </div>
+
+          {/* Market cards — grouped by category */}
+          {activeCategory === 'all' ? (
+            categories.map(cat => {
+              const catMarkets = filtered.filter(m => m.category === cat);
+              if (!catMarkets.length) return null;
+              const catLabel = CATEGORIES.find(c => c.id === cat)?.label || cat.charAt(0).toUpperCase() + cat.slice(1);
+              return (
+                <div key={cat} style={{ maxWidth: 1180, margin: '0 auto 28px' }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {catLabel}
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>›</span>
+                  </div>
+                  <div className="cards-grid">
+                    {catMarkets.map(m => (
+                      <MarketCard key={m.id} market={m} onClick={() => setSelectedMarket(m)} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })
           ) : (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-              No events in watchlist. Click ☆ Watch on any market to add it here.
+            <div className="cards-grid">
+              {filtered.map(m => (
+                <MarketCard key={m.id} market={m} onClick={() => setSelectedMarket(m)} />
+              ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* ================ MODALS ================ */}
-      {selectedAttributor && (
-        <AttributorModal attributor={selectedAttributor} onClose={() => setSelectedAttributor(null)} onSave={saveAttributor} />
+          {filtered.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+              No markets found.
+            </div>
+          )}
+
+          {/* Data source indicator */}
+          <div style={{ maxWidth: 1180, margin: '20px auto 0', textAlign: 'center' }}>
+            <span className="data-pill">
+              {dataSource === 'live' ? '● Live Data' : '◌ Demo Data'} · Powered by Pythia PCE
+            </span>
+          </div>
+        </>
       )}
-      {showPrefs && <PreferencesPanel onClose={() => setShowPrefs(false)} />}
     </div>
   );
 }

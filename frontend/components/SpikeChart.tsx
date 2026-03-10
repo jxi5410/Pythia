@@ -1,14 +1,47 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import type { Spike, Attributor, ForwardSignal, PricePoint, MarketAnalysis } from '@/types';
+import { useMemo, useState } from 'react';
 
 interface SpikeChartProps {
-  marketId: string;
-  apiBase?: string;
+  data: number[];          // probabilityHistory array (30+ points)
   height?: number;
-  onSpikeClick?: (spike: Spike) => void;
-  onAttributorClick?: (attributor: Attributor) => void;
+  width?: number;
+  showSpikes?: boolean;    // detect and overlay spikes
+  spikeThreshold?: number; // min move to mark as spike (0-1)
+  positive?: boolean;
+  interactive?: boolean;
+}
+
+interface DetectedSpike {
+  index: number;
+  magnitude: number;
+  direction: 'up' | 'down';
+  priceBefore: number;
+  priceAfter: number;
+}
+
+function detectSpikes(data: number[], threshold: number = 0.03, windowSize: number = 3): DetectedSpike[] {
+  if (!data || data.length < windowSize + 1) return [];
+  const spikes: DetectedSpike[] = [];
+  let lastSpikeIdx = -999;
+
+  for (let i = windowSize; i < data.length; i++) {
+    const windowStart = data[i - windowSize];
+    const current = data[i];
+    const move = Math.abs(current - windowStart);
+
+    if (move >= threshold && (i - lastSpikeIdx) >= windowSize) {
+      spikes.push({
+        index: i,
+        magnitude: move,
+        direction: current > windowStart ? 'up' : 'down',
+        priceBefore: windowStart,
+        priceAfter: current,
+      });
+      lastSpikeIdx = i;
+    }
+  }
+  return spikes;
 }
 
 function spikeColor(mag: number): string {
@@ -18,131 +51,119 @@ function spikeColor(mag: number): string {
   return '#94a3b8';
 }
 
-function fmtDate(ts: string) {
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-export default function SpikeChart({ marketId, apiBase = '/api/v1', height = 300, onSpikeClick, onAttributorClick }: SpikeChartProps) {
-  const [data, setData] = useState<MarketAnalysis | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [hoveredSpike, setHoveredSpike] = useState<Spike | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-
-  useEffect(() => {
-    setLoading(true);
-    fetch(`${apiBase}/analyze/${encodeURIComponent(marketId)}?hours=720&spike_threshold=0.02`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [marketId, apiBase]);
-
-  const margin = { top: 16, right: 48, bottom: 32, left: 52 };
-  const width = 760;
-  const cw = width - margin.left - margin.right;
-  const ch = height - margin.top - margin.bottom;
+export default function SpikeChart({
+  data,
+  height = 160,
+  width = 500,
+  showSpikes = true,
+  spikeThreshold = 0.03,
+  positive = true,
+  interactive = true,
+}: SpikeChartProps) {
+  const [hovered, setHovered] = useState<DetectedSpike | null>(null);
+  const [mouseX, setMouseX] = useState(0);
 
   const chart = useMemo(() => {
-    if (!data?.price_history?.length) return null;
-    const pts = data.price_history.map(p => ({ t: new Date(p.timestamp).getTime(), p: p.yes_price }))
-      .filter(p => !isNaN(p.t)).sort((a, b) => a.t - b.t);
-    if (pts.length < 2) return null;
+    if (!data || data.length < 2) return null;
 
-    const tMin = pts[0].t, tMax = pts[pts.length - 1].t;
-    const pArr = pts.map(p => p.p);
-    const pMin = Math.max(0, Math.min(...pArr) - 0.02);
-    const pMax = Math.min(1, Math.max(...pArr) + 0.02);
-    const sx = (t: number) => ((t - tMin) / (tMax - tMin)) * cw;
-    const sy = (p: number) => ch - ((p - pMin) / (pMax - pMin)) * ch;
+    const pad = { top: 12, right: 8, bottom: 4, left: 8 };
+    const cw = width - pad.left - pad.right;
+    const ch = height - pad.top - pad.bottom;
 
-    const line = 'M' + pts.map(p => `${sx(p.t)},${sy(p.p)}`).join('L');
-    const area = `${line}L${sx(tMax)},${ch}L${sx(tMin)},${ch}Z`;
+    const mn = Math.min(...data);
+    const mx = Math.max(...data);
+    const range = mx - mn || 0.01;
 
-    const spikes = (data.spikes || []).map(s => {
-      const st = new Date(s.timestamp).getTime();
-      return { ...s, cx: sx(st), cy: sy(s.price_after), color: spikeColor(s.magnitude) };
-    }).filter(s => s.cx >= 0 && s.cx <= cw);
+    const sx = (i: number) => pad.left + (i / (data.length - 1)) * cw;
+    const sy = (v: number) => pad.top + ch - ((v - mn) / range) * ch;
 
-    const yTicks: number[] = [];
-    for (let i = 0; i <= 4; i++) yTicks.push(pMin + ((pMax - pMin) / 4) * i);
+    const pts = data.map((v, i) => `${sx(i)},${sy(v)}`);
+    const line = `M${pts.join('L')}`;
+    const area = `${line}L${sx(data.length - 1)},${pad.top + ch}L${sx(0)},${pad.top + ch}Z`;
 
-    const xTicks: { t: number; label: string }[] = [];
-    for (let i = 0; i <= 5; i++) {
-      const t = tMin + ((tMax - tMin) / 5) * i;
-      xTicks.push({ t, label: fmtDate(new Date(t).toISOString()) });
-    }
+    const spikes = showSpikes ? detectSpikes(data, spikeThreshold) : [];
+    const spikeMarkers = spikes.map(s => ({
+      ...s,
+      cx: sx(s.index),
+      cy: sy(s.priceAfter),
+    }));
 
-    return { line, area, spikes, yTicks, xTicks, sx, sy, pMin, pMax, tMin, tMax };
-  }, [data, cw, ch]);
+    // Y-axis labels (just min and max)
+    const yLabels = [
+      { y: sy(mx), label: `${(mx * 100).toFixed(0)}%` },
+      { y: sy(mn), label: `${(mn * 100).toFixed(0)}%` },
+    ];
 
-  if (loading) return <div className="flex items-center justify-center" style={{ height }}><div className="loading-spinner" /></div>;
-  if (!chart) return <div className="flex items-center justify-center" style={{ height }}><span style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data</span></div>;
+    return { line, area, spikeMarkers, yLabels, sx, sy, pad, cw, ch, mn, mx };
+  }, [data, width, height, showSpikes, spikeThreshold]);
+
+  if (!chart) return null;
+
+  const lineColor = positive ? '#16a34a' : '#dc2626';
+  const fillColor = positive ? 'rgba(22,163,74,0.06)' : 'rgba(220,38,38,0.06)';
 
   return (
     <div style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', maxHeight: height }}
-        onMouseMove={e => { const r = e.currentTarget.getBoundingClientRect(); setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top }); }}
-        onMouseLeave={() => setHoveredSpike(null)}>
-        <defs>
-          <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.10" />
-            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.01" />
-          </linearGradient>
-        </defs>
-        <g transform={`translate(${margin.left},${margin.top})`}>
-          {chart.yTicks.map((t, i) => {
-            const y = ch - ((t - chart.pMin) / (chart.pMax - chart.pMin)) * ch;
-            return <g key={i}><line x1={0} y1={y} x2={cw} y2={y} stroke="var(--border-subtle)" strokeDasharray="3,4" /><text x={-6} y={y + 3} textAnchor="end" fill="var(--text-muted)" fontSize={10} fontFamily="var(--font-mono)">{(t * 100).toFixed(0)}%</text></g>;
-          })}
-          {chart.xTicks.map((t, i) => <text key={i} x={chart.sx(t.t)} y={ch + 22} textAnchor="middle" fill="var(--text-muted)" fontSize={10}>{t.label}</text>)}
-          <path d={chart.area} fill="url(#cg)" />
-          <path d={chart.line} fill="none" stroke="var(--accent)" strokeWidth={1.5} strokeLinejoin="round" />
-          {chart.spikes.map((s, i) => (
-            <g key={i} style={{ cursor: 'pointer' }}
-              onMouseEnter={() => setHoveredSpike(s)}
-              onMouseLeave={() => setHoveredSpike(null)}
-              onClick={() => onSpikeClick?.(s)}>
-              <line x1={s.cx} y1={0} x2={s.cx} y2={ch} stroke={s.color} strokeWidth={1} strokeOpacity={0.25} strokeDasharray="2,3" />
-              <circle cx={s.cx} cy={s.cy} r={s.magnitude >= 0.08 ? 6 : s.magnitude >= 0.04 ? 5 : 4} fill={s.color} fillOpacity={0.85} stroke={s.color} strokeWidth={2} strokeOpacity={0.3} />
-              <text x={s.cx} y={s.cy - 10} textAnchor="middle" fill={s.color} fontSize={11} fontWeight="bold">{s.direction === 'up' ? '▲' : '▼'}</text>
-            </g>
-          ))}
-        </g>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: '100%', height }}
+        onMouseMove={interactive ? (e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setMouseX(e.clientX - rect.left);
+        } : undefined}
+        onMouseLeave={() => setHovered(null)}
+      >
+        {/* Y-axis labels */}
+        {chart.yLabels.map((yl, i) => (
+          <text key={i} x={width - 4} y={yl.y + 3} textAnchor="end"
+            fill="#a1a1aa" fontSize={9} fontFamily="'JetBrains Mono', monospace">{yl.label}</text>
+        ))}
+
+        {/* Grid lines */}
+        <line x1={chart.pad.left} y1={chart.yLabels[0].y} x2={width - 40} y2={chart.yLabels[0].y}
+          stroke="#e5e5e8" strokeDasharray="3,4" />
+        <line x1={chart.pad.left} y1={chart.yLabels[1].y} x2={width - 40} y2={chart.yLabels[1].y}
+          stroke="#e5e5e8" strokeDasharray="3,4" />
+
+        {/* Area + line */}
+        <path d={chart.area} fill={fillColor} />
+        <path d={chart.line} fill="none" stroke={lineColor} strokeWidth={1.8} strokeLinejoin="round" />
+
+        {/* Spike markers */}
+        {chart.spikeMarkers.map((s, i) => (
+          <g key={i} style={{ cursor: interactive ? 'pointer' : 'default' }}
+            onMouseEnter={() => setHovered(s)}
+            onMouseLeave={() => setHovered(null)}>
+            {/* Vertical line */}
+            <line x1={s.cx} y1={chart.pad.top} x2={s.cx} y2={chart.pad.top + chart.ch}
+              stroke={spikeColor(s.magnitude)} strokeWidth={1} strokeOpacity={0.3} strokeDasharray="2,3" />
+            {/* Dot */}
+            <circle cx={s.cx} cy={s.cy}
+              r={s.magnitude >= 0.08 ? 5 : s.magnitude >= 0.04 ? 4 : 3.5}
+              fill={spikeColor(s.magnitude)} fillOpacity={0.9}
+              stroke="white" strokeWidth={1.5} />
+            {/* Arrow */}
+            <text x={s.cx} y={s.cy - 8} textAnchor="middle"
+              fill={spikeColor(s.magnitude)} fontSize={9} fontWeight="bold">
+              {s.direction === 'up' ? '▲' : '▼'}
+            </text>
+          </g>
+        ))}
       </svg>
 
-      {hoveredSpike && (
+      {/* Tooltip */}
+      {hovered && interactive && (
         <div style={{
-          position: 'absolute', left: Math.min(mousePos.x + 12, 560), top: Math.max(mousePos.y - 70, 4),
-          background: 'var(--bg-card)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-          padding: '10px 14px', boxShadow: 'var(--shadow-lg)', zIndex: 50, pointerEvents: 'none', minWidth: 180,
+          position: 'absolute', left: Math.min(mouseX + 8, width - 160), top: 4,
+          background: '#18181b', color: 'white', borderRadius: 8,
+          padding: '8px 12px', fontSize: 11, lineHeight: 1.5,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)', pointerEvents: 'none', zIndex: 10,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: spikeColor(hoveredSpike.magnitude) }} />
-            <span style={{ fontWeight: 650, fontSize: 12, color: 'var(--text-primary)' }}>
-              {hoveredSpike.direction === 'up' ? '↑' : '↓'} {(hoveredSpike.magnitude * 100).toFixed(1)}pp
-            </span>
+          <div style={{ fontWeight: 700 }}>
+            {hovered.direction === 'up' ? '↑' : '↓'} {(hovered.magnitude * 100).toFixed(1)}pp spike
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            <div>{(hoveredSpike.price_before * 100).toFixed(1)}% → {(hoveredSpike.price_after * 100).toFixed(1)}%</div>
-            <div>{fmtTime(hoveredSpike.timestamp)}</div>
-          </div>
-        </div>
-      )}
-
-      {data?.attributors && data.attributors.length > 0 && (
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
-          <div className="data-label" style={{ marginBottom: 6 }}>Attributors</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {data.attributors.slice(0, 5).map(a => (
-              <button key={a.id} onClick={() => onAttributorClick?.(a)}
-                className="layer-tag" style={{ cursor: 'pointer', opacity: Math.max(0.5, a.confidence_score || 0.5) }}>
-                {a.name?.slice(0, 35)}{a.name && a.name.length > 35 ? '…' : ''}
-                <span style={{ marginLeft: 4, color: 'var(--text-muted)', fontSize: 10 }}>{a.confidence}</span>
-              </button>
-            ))}
+          <div style={{ opacity: 0.7 }}>
+            {(hovered.priceBefore * 100).toFixed(1)}% → {(hovered.priceAfter * 100).toFixed(1)}%
           </div>
         </div>
       )}
