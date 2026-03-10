@@ -12,6 +12,7 @@ interface SpikeChartProps {
   positive?: boolean;
   label?: string;            // e.g. "Yes" outcome label
   attributors?: { name: string; confidence: number }[];
+  interactive?: boolean;     // show crosshair + tooltips on hover
 }
 
 interface DetectedSpike {
@@ -88,6 +89,7 @@ export default function SpikeChart({
   data, timestamps, height = 200, width = 600,
   showSpikes = true, spikeThreshold = 0.04,
   positive = true, label = 'Yes', attributors,
+  interactive = true,
 }: SpikeChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [cursor, setCursor] = useState<{ x: number; idx: number } | null>(null);
@@ -167,9 +169,9 @@ export default function SpikeChart({
   return (
     <div style={{ position: 'relative', userSelect: 'none' }}>
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`}
-        style={{ width: '100%', height, cursor: 'crosshair' }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => { setCursor(null); setHoveredSpike(null); }}>
+        style={{ width: '100%', height, cursor: interactive ? 'crosshair' : 'default' }}
+        onMouseMove={interactive ? handleMouseMove : undefined}
+        onMouseLeave={interactive ? () => { setCursor(null); setHoveredSpike(null); } : undefined}>
 
         {/* Y-axis grid + labels */}
         {chart.yTicks.map((t, i) => (
