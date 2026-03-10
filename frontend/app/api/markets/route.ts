@@ -340,31 +340,62 @@ const mockMarkets = [
   },
 ];
 
-// Mock attributor data per market for spike hover tooltips
-const mockAttributors: Record<string, { name: string; confidence: number }[]> = {
-  'pm-fed-rate-mar': [
-    { name: 'FOMC minutes leaked dovish tone', confidence: 0.82 },
-    { name: 'PCE inflation undershoots consensus', confidence: 0.71 },
-    { name: 'Treasury yield curve inversion deepens', confidence: 0.54 },
-  ],
-  'pm-trump-tariff-china': [
-    { name: 'Trump executive order on rare earths', confidence: 0.88 },
-    { name: 'Retaliatory tariffs from Beijing MoC', confidence: 0.76 },
-    { name: 'USTR Section 301 investigation expanded', confidence: 0.63 },
-  ],
-  'kal-btc-100k': [
-    { name: 'BlackRock IBIT record daily inflows ($2.1B)', confidence: 0.79 },
-    { name: 'Mt. Gox creditor distribution deadline', confidence: 0.61 },
-  ],
-  'pm-ukraine-ceasefire': [
-    { name: 'Zelenskyy-Trump bilateral in Ankara', confidence: 0.73 },
-    { name: 'Lavrov signals territorial concession framework', confidence: 0.68 },
-    { name: 'Minsk III draft circulated at UNSC', confidence: 0.42 },
-  ],
-  'kal-sp500-ath': [
-    { name: 'Mega-cap earnings beat cycle (NVDA, MSFT)', confidence: 0.85 },
-    { name: 'VIX sub-12 compression', confidence: 0.61 },
-  ],
+// Per-spike attributors — different causes for each spike within a market
+// Key: market id → spike index → attributors with source URLs
+const perSpikeAttributors: Record<string, Record<number, { name: string; confidence: number; url?: string }[]>> = {
+  'pm-fed-rate-mar': {
+    0: [
+      { name: 'FOMC minutes leaked dovish tone', confidence: 0.82, url: 'https://www.reuters.com/markets/us/fed-minutes/' },
+      { name: 'PCE inflation undershoots consensus', confidence: 0.71, url: 'https://www.bls.gov/pce/' },
+    ],
+    1: [
+      { name: 'Treasury yield curve inversion deepens', confidence: 0.67, url: 'https://www.treasury.gov/resource-center/data-chart-center/' },
+      { name: 'Waller speech hints at March cut', confidence: 0.59, url: 'https://www.federalreserve.gov/newsevents/speech.htm' },
+    ],
+    2: [
+      { name: 'Jobs report: NFP misses by 80K', confidence: 0.74, url: 'https://www.bls.gov/news.release/empsit.nr0.htm' },
+    ],
+  },
+  'pm-trump-tariff-china': {
+    0: [
+      { name: 'Trump executive order on rare earths', confidence: 0.88, url: 'https://www.whitehouse.gov/presidential-actions/' },
+      { name: 'USTR Section 301 investigation expanded', confidence: 0.63, url: 'https://ustr.gov/issue-areas/enforcement/section-301-investigations' },
+    ],
+    1: [
+      { name: 'Retaliatory tariffs from Beijing MoC', confidence: 0.76, url: 'http://english.mofcom.gov.cn/' },
+      { name: 'Semiconductor export controls tightened', confidence: 0.68, url: 'https://www.bis.gov/regulations' },
+    ],
+    2: [
+      { name: 'Phase 2 trade talks collapse in Geneva', confidence: 0.81, url: 'https://www.reuters.com/world/china/' },
+    ],
+  },
+  'kal-btc-100k': {
+    0: [
+      { name: 'BlackRock IBIT record daily inflows ($2.1B)', confidence: 0.79, url: 'https://www.blackrock.com/us/financial-professionals/products/ibit' },
+    ],
+    1: [
+      { name: 'Mt. Gox creditor distribution deadline', confidence: 0.71, url: 'https://www.mtgox.com/' },
+      { name: 'Tether attestation report questioned', confidence: 0.52, url: 'https://tether.to/en/transparency/' },
+    ],
+  },
+  'pm-ukraine-ceasefire': {
+    0: [
+      { name: 'Zelenskyy-Trump bilateral in Ankara', confidence: 0.73, url: 'https://www.reuters.com/world/europe/' },
+      { name: 'Minsk III draft circulated at UNSC', confidence: 0.42, url: 'https://www.un.org/securitycouncil/' },
+    ],
+    1: [
+      { name: 'Lavrov signals territorial concession framework', confidence: 0.68, url: 'https://www.reuters.com/world/europe/' },
+    ],
+  },
+  'kal-sp500-ath': {
+    0: [
+      { name: 'Mega-cap earnings beat cycle (NVDA, MSFT)', confidence: 0.85, url: 'https://finance.yahoo.com/quote/NVDA/' },
+    ],
+    1: [
+      { name: 'VIX sub-12 compression', confidence: 0.61, url: 'https://www.cboe.com/tradable_products/vix/' },
+      { name: 'Retail inflows hit 2024 highs', confidence: 0.54, url: 'https://www.reuters.com/markets/us/' },
+    ],
+  },
 };
 
 export async function GET(request: Request) {
@@ -404,10 +435,10 @@ export async function GET(request: Request) {
       ...m,
       probabilityHistory: genHistory(m.probability, m.previousProbability),
       signal: marketSignals[m.id] || null,
-      attributors: mockAttributors[m.id] || [
-        { name: 'Market sentiment shift', confidence: 0.45 },
-        { name: 'Volume anomaly detected', confidence: 0.32 },
-      ],
+      spikeAttributors: perSpikeAttributors[m.id] || {
+        0: [{ name: 'Market sentiment shift', confidence: 0.45 }],
+        1: [{ name: 'Volume anomaly detected', confidence: 0.32 }],
+      },
       dataSource: 'mock' as const,
     }));
 
