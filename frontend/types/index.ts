@@ -120,3 +120,16 @@ export const MARKET_CATEGORIES = [
   { id: 'tech', label: 'Tech', icon: '⚡' },
   { id: 'sports', label: 'Sports', icon: '⚽' },
 ] as const;
+
+export interface SignalDetail extends Signal {
+  historicalPrecedent: { date: string; outcome: string; assetMove: string }[];
+  edgeDecayCurve: { time: string; alphaRemaining: number }[];
+  layersWithLinks?: { text: string; url: string }[];
+}
+
+export interface MarketCategory {
+  id: string;
+  label: string;
+  count: number;
+  icon: string;
+}
