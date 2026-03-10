@@ -540,6 +540,9 @@ SPIKE: {direction} {magnitude:.1%} move
   Time: {timestamp}
   Volume: ${volume:,.0f}
 
+STATISTICAL VALIDATION:
+{statistical_evidence}
+
 CONCURRENT MARKET MOVES ({n_correlated} markets moved within 2 hours):
 {correlated_text}
 
@@ -608,6 +611,25 @@ def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None,
     causal_prompt = CAUSAL_PROMPT
     if extra_context:
         causal_prompt = CAUSAL_PROMPT + extra_context
+
+    # Format statistical evidence for the prompt
+    stat_val = context.get("statistical_validation")
+    if stat_val:
+        stat_lines = [
+            f"  Method: {stat_val.get('method', 'N/A')}",
+            f"  Statistically significant: {stat_val.get('is_significant', 'N/A')}",
+            f"  P-value: {stat_val.get('p_value', 'N/A')}",
+        ]
+        if stat_val.get("z_score") is not None:
+            stat_lines.append(f"  Z-score: {stat_val['z_score']}")
+        if stat_val.get("n_controls"):
+            stat_lines.append(f"  Control markets used: {stat_val['n_controls']}")
+        if stat_val.get("relative_effect_pct") is not None:
+            stat_lines.append(f"  Relative effect: {stat_val['relative_effect_pct']}%")
+        statistical_evidence = "\n".join(stat_lines)
+    else:
+        statistical_evidence = "  Not available (insufficient data for counterfactual analysis)"
+
     prompt = causal_prompt.format(
         market_title=context["market_title"],
         category=context["category"],
@@ -617,6 +639,7 @@ def reason_about_cause(context: Dict, candidates: List[Dict], llm_call=None,
         price_after=spike["price_after"],
         timestamp=spike["timestamp"],
         volume=spike["volume"],
+        statistical_evidence=statistical_evidence,
         n_correlated=len(context["correlated_spikes"]),
         correlated_text=format_correlated(context["correlated_spikes"]),
         candidates_text=format_candidates(candidates),
@@ -837,6 +860,47 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
     context = build_spike_context(spike, all_recent_spikes or [], entity_llm=entity_llm)
     logger.info("Context built: category=%s, entities=%s, correlated=%d",
                 context["category"], context["entities"], len(context["correlated_spikes"]))
+
+    # Layer 1.5: Counterfactual Validation (CausalImpact / z-score)
+    # Tests whether spike is statistically significant before burning LLM credits
+    statistical_validation = None
+    try:
+        from .counterfactual import validate_spike
+        if db:
+            statistical_validation = validate_spike(
+                db=db,
+                market_id=spike.market_id,
+                spike_timestamp=spike.timestamp,
+                spike_magnitude=spike.magnitude,
+            )
+            context["statistical_validation"] = statistical_validation
+
+            if statistical_validation and not statistical_validation.get("is_significant", True):
+                logger.info(
+                    "Spike failed statistical validation (p=%.4f, method=%s) — skipping LLM attribution",
+                    statistical_validation.get("p_value", 1.0),
+                    statistical_validation.get("method", "unknown"),
+                )
+                return {
+                    "spike_id": spike.id,
+                    "context": context,
+                    "statistical_validation": statistical_validation,
+                    "attribution": {
+                        "most_likely_cause": "Spike not statistically significant — within normal variance",
+                        "confidence": "LOW",
+                        "confidence_reasoning": f"CausalImpact p-value={statistical_validation.get('p_value', 'N/A')}, "
+                                               f"method={statistical_validation.get('method', 'N/A')}",
+                    },
+                    "candidates_retrieved": 0,
+                    "candidates_filtered": 0,
+                    "top_candidates": [],
+                    "filtered_by": "counterfactual_validation",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+    except ImportError:
+        logger.debug("counterfactual module not available — skipping statistical validation")
+    except Exception as e:
+        logger.warning("Statistical validation failed (non-fatal): %s", e)
 
     # Layer 2: News Retrieval (NewsAPI + Google News + DDG + Reddit, temporally filtered)
     candidates = retrieve_candidate_news(context)
