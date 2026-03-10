@@ -920,6 +920,53 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
                 attribution.get("most_likely_cause", "?")[:60],
                 attribution.get("confidence", "?"))
 
+    # Layer 4.5: DoWhy Refutation (formal causal graph validation)
+    dowhy_result = None
+    try:
+        from .causal_dag import estimate_causal_effect
+        dowhy_result = estimate_causal_effect(context, db=db)
+        if dowhy_result and dowhy_result.get("estimated_effect") is not None:
+            logger.info(
+                "DoWhy: effect=%.4f refutation=%s (category=%s)",
+                dowhy_result["estimated_effect"],
+                "PASSED" if dowhy_result.get("refutation_passed") else "FAILED",
+                dowhy_result.get("dag_category", "?"),
+            )
+            # If refutation fails, downgrade confidence
+            if not dowhy_result.get("refutation_passed", True):
+                if attribution.get("confidence") == "HIGH":
+                    attribution["confidence"] = "MEDIUM"
+                    attribution["confidence_reasoning"] = (
+                        (attribution.get("confidence_reasoning", "") +
+                         " [DoWhy refutation test failed — downgraded from HIGH]")
+                    )
+    except ImportError:
+        logger.debug("causal_dag module not available — skipping DoWhy validation")
+    except Exception as e:
+        logger.warning("DoWhy validation failed (non-fatal): %s", e)
+
+    # Layer 4.6: Heterogeneous Effect Prediction (EconML)
+    het_effect = None
+    try:
+        from .heterogeneous_effects import predict_effect
+        het_effect = predict_effect(context)
+        if het_effect and het_effect.get("predicted_effect") is not None:
+            logger.info(
+                "EconML: predicted=%.4f observed=%.4f anomaly=%s",
+                het_effect["predicted_effect"],
+                het_effect.get("observed_magnitude", 0),
+                het_effect.get("anomaly_flag", "N/A"),
+            )
+            # Flag anomalous spike sizes in the attribution
+            anomaly = het_effect.get("anomaly_flag", "")
+            if anomaly in ("MUCH_LARGER_THAN_EXPECTED", "MUCH_SMALLER_THAN_EXPECTED"):
+                attribution["size_anomaly"] = anomaly
+                attribution["predicted_effect"] = het_effect["predicted_effect"]
+    except ImportError:
+        logger.debug("heterogeneous_effects module not available — skipping EconML")
+    except Exception as e:
+        logger.warning("EconML prediction failed (non-fatal): %s", e)
+
     # Layer 5: Package and store
     result = {
         "spike_id": spike.id,
@@ -928,6 +975,9 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
         "candidates_filtered": len(filtered),
         "top_candidates": filtered[:3],
         "attribution": attribution,
+        "statistical_validation": context.get("statistical_validation"),
+        "dowhy_validation": dowhy_result,
+        "heterogeneous_effect": het_effect,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
