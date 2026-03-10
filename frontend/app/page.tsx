@@ -30,7 +30,40 @@ function fmtCurrency(v: number) { return v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` 
 function fmtEndDate(d: string) { return `Ends ${new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`; }
 function fmtDaysLeft(d: string) { const days = Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)); return days === 0 ? 'Ends today' : `${days}d left`; }
 function changePp(c: number, p: number) { return (c - p) * 100; }
-function truncate(s: string, n: number) { return s.length > n ? s.slice(0, n) + '…' : s; }
+// Smart text shortener — condenses market questions to fit nav buttons
+function shorten(s: string, maxLen: number = 42): string {
+  if (s.length <= maxLen) return s;
+  // Step 1: Remove common filler
+  let t = s
+    .replace(/^Will (the )?/i, '')
+    .replace(/^Does (the )?/i, '')
+    .replace(/^Is (the )?/i, '')
+    .replace(/ by (the )?end of /i, ' by ')
+    .replace(/ before (the )?end of /i, ' before ')
+    .replace(/ at (the )?(March|April|May|June|July|August|September|October|November|December|January|February) \d{4} /i, (_, __, m) => ` at ${m.slice(0, 3)} `)
+    .replace(/ (January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/gi, (_, m, y) => ` ${m.slice(0, 3)} ${y}`)
+    .replace(/ United States/gi, ' US')
+    .replace(/ President /gi, ' Pres. ')
+    .replace(/ government /gi, ' gov\'t ')
+    .replace(/ percent/gi, '%')
+    .replace(/ percentage points/gi, 'pp')
+    .replace(/ billion/gi, 'B')
+    .replace(/ million/gi, 'M')
+    .replace(/ cryptocurrency/gi, ' crypto')
+    .replace(/ agreement/gi, ' deal')
+    .replace(/ regulation/gi, ' reg.')
+    .replace(/ approximately/gi, ' ~')
+    .replace(/\?$/, '');
+  if (t.length <= maxLen) return t;
+  // Step 2: Truncate with ellipsis at word boundary
+  const words = t.split(' ');
+  let result = '';
+  for (const w of words) {
+    if ((result + ' ' + w).trim().length > maxLen - 1) break;
+    result = (result + ' ' + w).trim();
+  }
+  return result + '…';
+}
 
 function SourceLink({ source, url }: { source: string; url: string }) {
   const isK = source.toLowerCase().includes('kalshi');
@@ -180,8 +213,8 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
           ))}
         </div>
         <div style={{ display: 'flex', gap: 16 }}>
-          {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{truncate(prevName, 28)}</span></button>}
-          {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{truncate(nextName, 28)}</span><span>›</span></button>}
+          {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', width: 340, flexShrink: 0 }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
+          {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, width: 340, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span>›</span></button>}
         </div>
       </div>
     </div>
