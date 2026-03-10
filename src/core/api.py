@@ -111,6 +111,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Intelligence API — attributors, forward signals, narratives, preferences
+try:
+    from .intelligence_api import intelligence_router
+    app.include_router(intelligence_router)
+except ImportError:
+    pass  # intelligence_api module not available
+
 
 def _client_identifier(request: Request) -> str:
     forwarded_for = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
