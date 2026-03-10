@@ -1,0 +1,11 @@
+{
+  "initial_capital": 10000,
+  "max_daily_trades": 10,
+  "daily_loss_limit": 0.10,
+  "max_drawdown": 0.20,
+  "poll_interval": 30,
+  "signal_cooldown": 300,
+  "min_liquidity": 10000,
+  "probability_spike_threshold": 0.05,
+  "volume_spike_threshold": 3.0
+}
