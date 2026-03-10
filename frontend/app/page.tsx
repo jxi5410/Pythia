@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import SpikeChart from '@/components/SpikeChart';
 import type { SpikeAttributor } from '@/components/SpikeChart';
 
@@ -24,8 +24,7 @@ const CAT_LABELS: Record<string, string> = {
   defense: 'Politics · Defense',
 };
 
-const YES_C = '#788c5d';
-const NO_C = '#d97757';
+const YES_C = '#788c5d', NO_C = '#d97757';
 
 function fmtCurrency(v: number) { return v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${Math.round(v / 1e3).toLocaleString()}K` : `$${v}`; }
 function fmtEndDate(d: string) { return `Ends ${new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`; }
@@ -44,13 +43,58 @@ function SourceLink({ source, url }: { source: string; url: string }) {
   );
 }
 
+// ── Live data hook — polls /api/markets every 30s ──
+function useLiveMarkets(interval: number = 30000) {
+  const [markets, setMarkets] = useState<MarketData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dataSource, setDataSource] = useState('');
+  const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
+
+  const fetchData = useCallback(async () => {
+    try {
+      const r = await fetch('/api/markets?sort=volume');
+      const d = await r.json();
+      setMarkets(d.markets || []);
+      setDataSource(d.dataSource || '');
+      setLastUpdated(d.lastUpdated || new Date().toISOString());
+      setLoading(false);
+    } catch { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const timer = setInterval(fetchData, interval);
+    return () => clearInterval(timer);
+  }, [fetchData, interval]);
+
+  return { markets, loading, dataSource, lastUpdated };
+}
+
+// ── Live pulse indicator ──
+function LivePulse() {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+      <span style={{
+        width: 7, height: 7, borderRadius: '50%', background: YES_C,
+        boxShadow: `0 0 0 2px rgba(120,140,93,0.2)`,
+        animation: 'pulse-soft 2s ease-in-out infinite',
+      }} />
+      Live
+    </span>
+  );
+}
+
+// ================================================================
+// Hero Panel
+// ================================================================
 const HERO_H = 460;
 
-function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, bookmarked, onBookmark, onShare }: {
+function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, bookmarked, onBookmark, onShare, lastUpdated }: {
   market: MarketData; index: number; total: number;
   onPrev: () => void; onNext: () => void;
   prevName: string; nextName: string;
   bookmarked: boolean; onBookmark: () => void; onShare: () => void;
+  lastUpdated: string;
 }) {
   const prob = market.probability;
   const paysYes = prob > 0.01 ? (1 / prob).toFixed(2) : '—';
@@ -63,32 +107,31 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
         padding: 0, overflow: 'visible',
         height: HERO_H, minHeight: HERO_H, maxHeight: HERO_H,
       }}>
-        {/* Category LEFT + icons RIGHT */}
+        {/* Category + live indicator + icons */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px 0', flexShrink: 0 }}>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>{CAT_LABELS[market.category] || market.category}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>{CAT_LABELS[market.category] || market.category}</span>
+            <LivePulse />
+          </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={onShare} title="Share" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)', padding: 0 }}>↗</button>
             <button onClick={onBookmark} title="Bookmark" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: bookmarked ? NO_C : 'var(--text-muted)', padding: 0 }}>{bookmarked ? '★' : '☆'}</button>
           </div>
         </div>
 
-        {/* Title LEFT */}
+        {/* Title */}
         <div style={{ padding: '6px 22px 0', flexShrink: 0, textAlign: 'left' }}>
           <div style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.2, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textAlign: 'left' }}>
             {market.question}
           </div>
         </div>
 
-        {/* Body: left info + right chart */}
+        {/* Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'visible' }}>
-          {/* Left column */}
+          {/* Left */}
           <div style={{ flex: '0 0 280px', padding: '12px 22px 16px', display: 'flex', flexDirection: 'column' }}>
-            {/* Source logo — fixed at top */}
-            <div style={{ marginBottom: 10, flexShrink: 0 }}>
-              <SourceLink source={market.source} url={market.sourceUrl} />
-            </div>
+            <div style={{ marginBottom: 10, flexShrink: 0 }}><SourceLink source={market.source} url={market.sourceUrl} /></div>
 
-            {/* Odds table */}
             <table style={{ width: '100%', borderCollapse: 'collapse', flexShrink: 0 }}>
               <thead>
                 <tr style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
@@ -111,28 +154,26 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
               </tbody>
             </table>
 
-            {/* Supplemental — each fixed row below odds */}
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
               <span style={{ fontWeight: 600 }}>{fmtCurrency(market.totalVolume)} Vol</span>
               <span>{fmtEndDate(market.endDate)}</span>
               <span>{fmtDaysLeft(market.endDate)}</span>
             </div>
-
-            {/* NO signal box — removed per request */}
           </div>
 
           {/* Right: chart */}
           <div style={{ flex: 1, padding: '12px 16px 24px 0', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'visible' }}>
             <div style={{ flex: 1, minHeight: 0 }}>
               <SpikeChart data={market.probabilityHistory} height={340} width={860}
-                showSpikes spikeThreshold={0.04} interactive
-                spikeAttributors={market.spikeAttributors} />
+                showSpikes spikeThreshold={0.035} interactive
+                spikeAttributors={market.spikeAttributors}
+                lastUpdated={lastUpdated} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Nav below — tight to panel */}
+      {/* Nav below */}
       <div style={{ maxWidth: 1180, margin: '4px auto 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           {Array.from({ length: total }).map((_, i) => (
@@ -140,14 +181,17 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
           ))}
         </div>
         <div style={{ display: 'flex', gap: 16 }}>
-          {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)', maxWidth: 240 }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{truncate(prevName, 28)}</span></button>}
-          {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600, maxWidth: 240 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{truncate(nextName, 28)}</span><span>›</span></button>}
+          {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}><span>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{truncate(prevName, 28)}</span></button>}
+          {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: NO_C, fontWeight: 600 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{truncate(nextName, 28)}</span><span>›</span></button>}
         </div>
       </div>
     </div>
   );
 }
 
+// ================================================================
+// Market Card
+// ================================================================
 function MarketCard({ market, onClick }: { market: MarketData; onClick: () => void }) {
   const change = changePp(market.probability, market.previousProbability);
   const pos = change >= 0;
@@ -184,22 +228,24 @@ function MarketCard({ market, onClick }: { market: MarketData; onClick: () => vo
   );
 }
 
+// ================================================================
+// Main
+// ================================================================
 export default function Home() {
-  const [markets, setMarkets] = useState<MarketData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { markets, loading, dataSource, lastUpdated } = useLiveMarkets(30000);
   const [heroIdx, setHeroIdx] = useState(0);
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMarket, setSelectedMarket] = useState<MarketData | null>(null);
-  const [dataSource, setDataSource] = useState('');
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
 
+  // Keep selectedMarket in sync with live updates
   useEffect(() => {
-    setLoading(true);
-    fetch('/api/markets?sort=volume').then(r => r.json())
-      .then(d => { setMarkets(d.markets || []); setDataSource(d.dataSource || ''); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+    if (selectedMarket) {
+      const fresh = markets.find(m => m.id === selectedMarket.id);
+      if (fresh) setSelectedMarket(fresh);
+    }
+  }, [markets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hm = markets.filter(m => m.trending || m.signal);
   const toggleBM = (id: string) => setBookmarks(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -215,11 +261,11 @@ export default function Home() {
       {selectedMarket ? (
         <div style={{ maxWidth: 1180, margin: '0 auto' }}>
           <button onClick={() => setSelectedMarket(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: NO_C, fontSize: 13, fontWeight: 600, marginBottom: 14 }}>← Back</button>
-          <HeroPanel market={selectedMarket} index={0} total={1} onPrev={() => setSelectedMarket(null)} onNext={() => setSelectedMarket(null)} prevName="" nextName="" bookmarked={bookmarks.has(selectedMarket.id)} onBookmark={() => toggleBM(selectedMarket.id)} onShare={() => share(selectedMarket)} />
+          <HeroPanel market={selectedMarket} index={0} total={1} onPrev={() => setSelectedMarket(null)} onNext={() => setSelectedMarket(null)} prevName="" nextName="" bookmarked={bookmarks.has(selectedMarket.id)} onBookmark={() => toggleBM(selectedMarket.id)} onShare={() => share(selectedMarket)} lastUpdated={lastUpdated} />
         </div>
       ) : (
         <>
-          {hm.length > 0 && <HeroPanel market={hm[sI]} index={sI} total={hL} onPrev={() => setHeroIdx(pI)} onNext={() => setHeroIdx(nI)} prevName={hm[pI]?.question || ''} nextName={hm[nI]?.question || ''} bookmarked={bookmarks.has(hm[sI]?.id)} onBookmark={() => toggleBM(hm[sI]?.id)} onShare={() => share(hm[sI])} />}
+          {hm.length > 0 && <HeroPanel market={hm[sI]} index={sI} total={hL} onPrev={() => setHeroIdx(pI)} onNext={() => setHeroIdx(nI)} prevName={hm[pI]?.question || ''} nextName={hm[nI]?.question || ''} bookmarked={bookmarks.has(hm[sI]?.id)} onBookmark={() => toggleBM(hm[sI]?.id)} onShare={() => share(hm[sI])} lastUpdated={lastUpdated} />}
           <div className="control-bar" style={{ marginTop: 16 }}>
             <div className="filter-row">{CATEGORIES.map(c => <button key={c.id} className={`filter-chip ${activeCategory === c.id ? 'filter-chip-active' : ''}`} onClick={() => setActiveCategory(c.id)}>{c.label}</button>)}</div>
             <div style={{ position: 'relative', flex: '0 1 380px' }}><input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search events..." style={{ width: '100%', padding: '10px 14px 10px 34px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', fontSize: 13, color: 'var(--text-primary)', outline: 'none' }} /><span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 13 }}>⌕</span></div>
