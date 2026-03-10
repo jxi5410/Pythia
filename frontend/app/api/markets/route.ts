@@ -7,19 +7,50 @@ const LIVE_MARKET_LIMIT = 80;
 const OHLCV_ENRICH_LIMIT = 30;
 const OHLCV_CONCURRENCY = 8;
 
-// Generate mock probability history with occasional spikes
-function genHistory(current: number, previous: number, points: number = 30): number[] {
+// Generate realistic probability history — 200 points with random walk + clustered vol + spikes
+function genHistory(current: number, previous: number, points: number = 200): number[] {
   const history: number[] = [];
-  const base = previous - (current - previous) * 2;
+  const startVal = previous - (current - previous) * 1.5;
+  let val = Math.max(0.02, Math.min(0.98, startVal));
+  let vol = 0.006; // base volatility
+
+  // Place 2-3 spikes at random positions
+  const spikePositions = new Set<number>();
+  const numSpikes = 2 + Math.floor(Math.random() * 2);
+  for (let s = 0; s < numSpikes; s++) {
+    spikePositions.add(Math.floor(0.15 * points + Math.random() * 0.7 * points));
+  }
+
   for (let i = 0; i < points; i++) {
     const progress = i / (points - 1);
-    const trend = base + (current - base) * progress;
-    const noise = (Math.random() - 0.5) * 0.06;
-    const spike = (i === Math.floor(points * 0.3) || i === Math.floor(points * 0.7))
-      ? (Math.random() > 0.5 ? 0.08 : -0.08) : 0;
-    history.push(Math.max(0.01, Math.min(0.99, trend + noise + spike)));
+    // Gentle drift toward current price
+    const drift = (current - val) * 0.003;
+    // Clustered volatility — vol changes slowly
+    vol = vol * 0.97 + (0.003 + Math.random() * 0.008) * 0.03;
+    // Random walk step
+    let step = drift + (Math.random() - 0.5) * vol * 2;
+
+    // Spike injection: sharp move over 3-6 points
+    if (spikePositions.has(i)) {
+      const spikeMag = (0.04 + Math.random() * 0.08) * (Math.random() > 0.5 ? 1 : -1);
+      step += spikeMag / 4; // spread over a few points
+      vol *= 2.5; // elevated vol after spike
+    }
+    // Post-spike elevated vol decays
+    if (spikePositions.has(i - 1) || spikePositions.has(i - 2) || spikePositions.has(i - 3)) {
+      step += (Math.random() - 0.5) * vol;
+    }
+
+    val = Math.max(0.01, Math.min(0.99, val + step));
+    history.push(val);
   }
+  // Pin last point to current
   history[points - 1] = current;
+  // Smooth the last few points toward current
+  for (let i = points - 5; i < points - 1; i++) {
+    const blend = (i - (points - 5)) / 4;
+    history[i] = history[i] * (1 - blend * 0.3) + current * (blend * 0.3);
+  }
   return history;
 }
 
@@ -309,6 +340,33 @@ const mockMarkets = [
   },
 ];
 
+// Mock attributor data per market for spike hover tooltips
+const mockAttributors: Record<string, { name: string; confidence: number }[]> = {
+  'pm-fed-rate-mar': [
+    { name: 'FOMC minutes leaked dovish tone', confidence: 0.82 },
+    { name: 'PCE inflation undershoots consensus', confidence: 0.71 },
+    { name: 'Treasury yield curve inversion deepens', confidence: 0.54 },
+  ],
+  'pm-trump-tariff-china': [
+    { name: 'Trump executive order on rare earths', confidence: 0.88 },
+    { name: 'Retaliatory tariffs from Beijing MoC', confidence: 0.76 },
+    { name: 'USTR Section 301 investigation expanded', confidence: 0.63 },
+  ],
+  'kal-btc-100k': [
+    { name: 'BlackRock IBIT record daily inflows ($2.1B)', confidence: 0.79 },
+    { name: 'Mt. Gox creditor distribution deadline', confidence: 0.61 },
+  ],
+  'pm-ukraine-ceasefire': [
+    { name: 'Zelenskyy-Trump bilateral in Ankara', confidence: 0.73 },
+    { name: 'Lavrov signals territorial concession framework', confidence: 0.68 },
+    { name: 'Minsk III draft circulated at UNSC', confidence: 0.42 },
+  ],
+  'kal-sp500-ath': [
+    { name: 'Mega-cap earnings beat cycle (NVDA, MSFT)', confidence: 0.85 },
+    { name: 'VIX sub-12 compression', confidence: 0.61 },
+  ],
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
@@ -346,6 +404,10 @@ export async function GET(request: Request) {
       ...m,
       probabilityHistory: genHistory(m.probability, m.previousProbability),
       signal: marketSignals[m.id] || null,
+      attributors: mockAttributors[m.id] || [
+        { name: 'Market sentiment shift', confidence: 0.45 },
+        { name: 'Volume anomaly detected', confidence: 0.32 },
+      ],
       dataSource: 'mock' as const,
     }));
 
