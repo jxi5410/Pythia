@@ -111,7 +111,6 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>{CAT_LABELS[market.category] || market.category}</span>
-            <LivePulse />
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={onShare} title="Share" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)', padding: 0 }}>↗</button>
@@ -130,7 +129,7 @@ function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, b
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'visible' }}>
           {/* Left */}
           <div style={{ flex: '0 0 280px', padding: '12px 22px 16px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ marginBottom: 10, flexShrink: 0 }}><SourceLink source={market.source} url={market.sourceUrl} /></div>
+            <div style={{ marginBottom: 10, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><SourceLink source={market.source} url={market.sourceUrl} /><LivePulse /></div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', flexShrink: 0 }}>
               <thead>

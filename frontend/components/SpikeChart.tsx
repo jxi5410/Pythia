@@ -260,7 +260,7 @@ export default function SpikeChart({
             <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{(activeSpike.priceBefore * 100).toFixed(1)}% → {(activeSpike.priceAfter * 100).toFixed(1)}%</span>
           </div>
 
-          {activeSpike.attributors.length > 0 && (
+          {activeSpike.attributors.length > 0 ? (
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
               <div style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Probable Causes</div>
               {activeSpike.attributors.slice(0, 4).map((a, i) => (
@@ -277,10 +277,10 @@ export default function SpikeChart({
                 </div>
               ))}
             </div>
-          )}
-
-          {pinnedSpikeIdx !== null && (
-            <div style={{ marginTop: 6, fontSize: 10, color: '#706f6b', textAlign: 'center' }}>Click attributor for source · Click chart to close</div>
+          ) : (
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
+              <div style={{ color: '#706f6b', fontSize: 11, fontStyle: 'italic' }}>No clear attributor detected</div>
+            </div>
           )}
         </div>
       )}
