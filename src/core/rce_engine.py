@@ -60,8 +60,7 @@ def gather_evidence(ontology: CausalOntology, spike_context: Dict) -> Dict[str, 
     richer search queries from the ontology.
     """
     try:
-        from .causal_v2 import (
-            retrieve_candidate_news,
+        from .evidence.news_retrieval import (
             newsapi_search,
             google_news_rss,
             duckduckgo_search,

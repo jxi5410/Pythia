@@ -903,7 +903,8 @@ def attribute_spike_v2(spike, all_recent_spikes=None,
         logger.warning("Statistical validation failed (non-fatal): %s", e)
 
     # Layer 2: News Retrieval (NewsAPI + Google News + DDG + Reddit, temporally filtered)
-    candidates = retrieve_candidate_news(context)
+    from .evidence.news_retrieval import retrieve_candidate_news as shared_retrieve_candidate_news
+    candidates = shared_retrieve_candidate_news(context)
     logger.info("Retrieved %d candidate articles (temporally filtered)", len(candidates))
 
     # Layer 3: Filter (Sonnet)
@@ -1058,7 +1059,8 @@ def attribute_spike_with_governance(spike, all_recent_spikes=None,
         
         # Layer 2: News Retrieval
         layer_start = time.time()
-        candidates = retrieve_candidate_news(context)
+        from .evidence.news_retrieval import retrieve_candidate_news as shared_retrieve_candidate_news
+        candidates = shared_retrieve_candidate_news(context)
         
         trail.add_action(AgentAction(
             timestamp=datetime.now().isoformat(),
