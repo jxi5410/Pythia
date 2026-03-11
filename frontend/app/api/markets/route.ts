@@ -362,7 +362,7 @@ const mockMarkets = [
 
 // Per-spike attributors — different causes for each spike within a market
 // Key: market id → spike index → attributors with source URLs
-const perSpikeAttributors: Record<string, Record<number, { name: string; confidence: number; url?: string }[]>> = {
+const perSpikeAttributors: Record<string, Record<number, { name: string; confidence: number; url?: string; status?: 'active' | 'unconfirmed' }[]>> = {
   'pm-fed-rate-mar': {
     0: [
       { name: 'FOMC minutes leaked dovish tone', confidence: 0.82, url: 'https://www.reuters.com/markets/us/fed-minutes/' },
@@ -401,10 +401,11 @@ const perSpikeAttributors: Record<string, Record<number, { name: string; confide
   'pm-ukraine-ceasefire': {
     0: [
       { name: 'Zelenskyy-Trump bilateral in Ankara', confidence: 0.73, url: 'https://www.reuters.com/world/europe/' },
-      { name: 'Minsk III draft circulated at UNSC', confidence: 0.42, url: 'https://www.un.org/securitycouncil/' },
+      { name: 'Minsk III draft circulated at UNSC', confidence: 0.42, url: 'https://www.un.org/securitycouncil/', status: 'unconfirmed' },
     ],
     1: [
       { name: 'Lavrov signals territorial concession framework', confidence: 0.68, url: 'https://www.reuters.com/world/europe/' },
+      { name: 'Kremlin insider Telegram channel claims back-channel', confidence: 0.28, status: 'unconfirmed' },
     ],
   },
   'kal-sp500-ath': {
@@ -459,8 +460,8 @@ export async function GET(request: Request) {
         volumeHistory: genVolumeHistory(priceHist, m.totalVolume),
         signal: marketSignals[m.id] || null,
         spikeAttributors: perSpikeAttributors[m.id] || {
-          0: [{ name: 'Market sentiment shift', confidence: 0.45 }],
-          1: [{ name: 'Volume anomaly detected', confidence: 0.32 }],
+          0: [{ name: 'Market sentiment shift', confidence: 0.45, status: 'unconfirmed' as const }],
+          1: [{ name: 'Volume anomaly detected', confidence: 0.32, status: 'unconfirmed' as const }],
         },
         dataSource: 'mock' as const,
       };

@@ -6,6 +6,7 @@ export interface SpikeAttributor {
   name: string;
   confidence: number;
   url?: string;
+  status?: 'active' | 'unconfirmed';  // unconfirmed = low confidence, shown with distinct styling
 }
 
 export interface SpikeData {
@@ -190,12 +191,19 @@ export default function SpikeChart({
             fill="rgba(217,119,87,0.08)" rx={0.5} />;
         })}
 
-        {/* Spike shaded regions with P/- markers */}
+        {/* Spike shaded regions with P/?/– markers */}
         {chart.spikes.map((s, i) => {
           const x1 = chart.sx(s.startIdx), x2 = chart.sx(s.endIdx), midX = (x1 + x2) / 2;
           const up = s.direction === 'up', isA = i === activeSI;
-          const hasAttr = s.attributors && s.attributors.length > 0;
-          const mBg = hasAttr ? '#d97757' : '#b0aea5';
+          const confirmedAttr = s.attributors?.filter(a => a.status !== 'unconfirmed') || [];
+          const unconfirmedAttr = s.attributors?.filter(a => a.status === 'unconfirmed') || [];
+          const hasConfirmed = confirmedAttr.length > 0;
+          const hasUnconfirmed = unconfirmedAttr.length > 0;
+          const hasAny = s.attributors && s.attributors.length > 0;
+          // P = confirmed (orange), ? = unconfirmed only (blue), – = nothing (grey)
+          const mBg = hasConfirmed ? '#d97757' : hasUnconfirmed ? '#6a9bcc' : '#b0aea5';
+          const markerLabel = hasConfirmed ? 'P' : hasUnconfirmed ? '?' : '–';
+          const markerSize = markerLabel === '–' ? 11 : 9;
           return (
             <g key={`s-${i}`} style={{ cursor: interactive ? 'pointer' : 'default' }}
               onClick={interactive ? (e) => { e.stopPropagation(); setPinnedSpikeIdx(pinnedSpikeIdx === i ? null : i); } : undefined}>
@@ -205,8 +213,8 @@ export default function SpikeChart({
               <line x1={x2} y1={pad.top} x2={x2} y2={pad.top + ch} stroke={up ? 'rgba(120,140,93,0.4)' : 'rgba(196,69,54,0.4)'} strokeWidth={isA ? 1.5 : 1} />
               <circle cx={midX} cy={pad.top - 1} r={8} fill={isA ? mBg : 'white'} stroke={mBg} strokeWidth={1.5} />
               <text x={midX} y={pad.top + 3} textAnchor="middle" fill={isA ? 'white' : mBg}
-                fontSize={hasAttr ? 9 : 11} fontWeight={700} fontFamily="'JetBrains Mono', monospace" style={{ pointerEvents: 'none' }}>
-                {hasAttr ? 'P' : '–'}
+                fontSize={markerSize} fontWeight={700} fontFamily="'JetBrains Mono', monospace" style={{ pointerEvents: 'none' }}>
+                {markerLabel}
               </text>
             </g>
           );
@@ -277,28 +285,54 @@ export default function SpikeChart({
             <span style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Range</span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{(activeSpike.priceBefore * 100).toFixed(1)}% → {(activeSpike.priceAfter * 100).toFixed(1)}%</span>
           </div>
-          {activeSpike.attributors.length > 0 ? (
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
-              <div style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Probable Causes</div>
-              {activeSpike.attributors.slice(0, 4).map((a, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
-                  {a.url ? (
-                    <a href={a.url} target="_blank" rel="noopener noreferrer"
-                      style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8, color: '#8bb8d9', textDecoration: 'none' }}
-                      onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
-                      onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{a.name}</a>
-                  ) : (
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>{a.name}</span>
-                  )}
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#b0aea5', flexShrink: 0 }}>{(a.confidence * 100).toFixed(0)}%</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
-              <div style={{ color: '#706f6b', fontSize: 11, fontStyle: 'italic' }}>No clear attributor detected</div>
-            </div>
-          )}
+          {(() => {
+            const confirmed = activeSpike.attributors.filter(a => a.status !== 'unconfirmed');
+            const unconfirmed = activeSpike.attributors.filter(a => a.status === 'unconfirmed');
+            const hasAny = activeSpike.attributors.length > 0;
+            return (
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6, marginTop: 2 }}>
+                {confirmed.length > 0 && (
+                  <>
+                    <div style={{ color: '#b0aea5', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Probable Causes</div>
+                    {confirmed.slice(0, 4).map((a, i) => (
+                      <div key={`c-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3 }}>
+                        {a.url ? (
+                          <a href={a.url} target="_blank" rel="noopener noreferrer"
+                            style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8, color: '#8bb8d9', textDecoration: 'none' }}
+                            onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                            onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{a.name}</a>
+                        ) : (
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8 }}>{a.name}</span>
+                        )}
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#b0aea5', flexShrink: 0 }}>{(a.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {unconfirmed.length > 0 && (
+                  <>
+                    <div style={{ color: '#6a9bcc', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, marginTop: confirmed.length > 0 ? 6 : 0 }}>Unconfirmed</div>
+                    {unconfirmed.slice(0, 3).map((a, i) => (
+                      <div key={`u-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, marginBottom: 3, opacity: 0.7 }}>
+                        {a.url ? (
+                          <a href={a.url} target="_blank" rel="noopener noreferrer"
+                            style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8, color: '#6a9bcc', textDecoration: 'none' }}
+                            onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                            onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{a.name}</a>
+                        ) : (
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 8, color: '#6a9bcc' }}>{a.name}</span>
+                        )}
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: '#706f6b', flexShrink: 0 }}>{(a.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {!hasAny && (
+                  <div style={{ color: '#706f6b', fontSize: 11, fontStyle: 'italic' }}>Insufficient data coverage for this window</div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

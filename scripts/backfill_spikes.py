@@ -397,11 +397,11 @@ def run_backfill(
             spike.asset_class = classify_spike(spike)
 
             # Light attribution (DuckDuckGo only, no LLM)
-            if spike.magnitude >= 0.08:  # Only attribute big spikes
-                time.sleep(NEWS_DELAY)
-                spike.attributed_events = light_attribution(spike)
-                if spike.attributed_events:
-                    total_attributed += 1
+            # Attribute all detected spikes — threshold matches detection (5%)
+            time.sleep(NEWS_DELAY)
+            spike.attributed_events = light_attribution(spike)
+            if spike.attributed_events:
+                total_attributed += 1
 
             if dry_run:
                 logger.info(

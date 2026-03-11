@@ -162,8 +162,8 @@ def build_spike_context(spike, all_recent_spikes=None, entity_llm=None) -> Dict:
             "volume": spike.volume_at_spike,
         },
         "temporal_window": {
-            "start": (ts - timedelta(hours=2)).isoformat(),
-            "end": (ts + timedelta(minutes=30)).isoformat(),
+            "start": (ts - timedelta(hours=6)).isoformat(),
+            "end": (ts + timedelta(hours=1)).isoformat(),
         },
         "correlated_spikes": correlated,
         "is_macro": len(correlated) >= 2,
@@ -427,7 +427,7 @@ def retrieve_candidate_news(context: Dict) -> List[Dict]:
     subreddit = SUBREDDIT_MAP.get(category, "news")
     candidates += reddit_search(entity_query, subreddit=subreddit, max_results=5)
 
-    # Temporal filtering: keep only articles within 2h window
+    # Temporal filtering: keep only articles within 6h-before to 1h-after window
     candidates = filter_by_temporal_window(candidates, window["start"], window["end"])
 
     # Deduplicate by headline similarity

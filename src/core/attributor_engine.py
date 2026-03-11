@@ -57,7 +57,8 @@ def extract_attributor(pce_result: Dict) -> Optional[Dict]:
         pce_result: Output from attribute_spike_v2() or attribute_spike_with_governance()
 
     Returns:
-        Attributor dict or None if attribution is too weak
+        Attributor dict or None if attribution is truly empty.
+        LOW confidence attributions are kept with status='unconfirmed'.
     """
     attribution = pce_result.get("attribution", {})
     context = pce_result.get("context", {})
@@ -67,8 +68,6 @@ def extract_attributor(pce_result: Dict) -> Optional[Dict]:
         return None
 
     confidence = attribution.get("confidence", "LOW")
-    if confidence == "LOW":
-        return None
 
     category = context.get("category", "general")
     causal_chain = attribution.get("causal_chain", "")
@@ -76,6 +75,9 @@ def extract_attributor(pce_result: Dict) -> Optional[Dict]:
     duration = attribution.get("expected_duration", "UNKNOWN")
 
     spike = context.get("spike", {})
+
+    # LOW confidence → save as 'unconfirmed' instead of discarding
+    status = "active" if confidence in ("HIGH", "MEDIUM") else "unconfirmed"
 
     return {
         "attributor_id": _compute_attributor_id(cause, category),
@@ -89,7 +91,7 @@ def extract_attributor(pce_result: Dict) -> Optional[Dict]:
         "last_active": spike.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "spike_ids": [pce_result.get("spike_id")],
         "market_ids": [spike.get("market_id", "")] if spike.get("market_id") else [],
-        "status": "active",
+        "status": status,
         "spike_count": 1,
         "total_magnitude": float(spike.get("magnitude", 0)),
     }
@@ -259,7 +261,7 @@ class AttributorStore:
         """Find an existing attributor with similar name in same category."""
         conn = self.db._get_conn()
         rows = conn.execute(
-            "SELECT * FROM attributors WHERE category = ? AND status IN ('active', 'fading')",
+            "SELECT * FROM attributors WHERE category = ? AND status IN ('active', 'fading', 'unconfirmed')",
             (category,)
         ).fetchall()
 
@@ -314,7 +316,9 @@ class AttributorStore:
         return aid
 
     def _merge_into_existing(self, existing: Dict, new_data: Dict) -> str:
-        """Merge new spike data into an existing attributor."""
+        """Merge new spike data into an existing attributor.
+        Promotes 'unconfirmed' to 'active' if new data has MEDIUM+ confidence.
+        """
         aid = existing["id"]
         conn = self.db._get_conn()
 
@@ -331,6 +335,18 @@ class AttributorStore:
         new_total_mag = float(existing.get("total_magnitude", 0)) + float(new_data.get("total_magnitude", 0))
         new_avg = new_total_mag / max(new_count, 1)
 
+        # Promote unconfirmed → active if new evidence is MEDIUM+ confidence,
+        # or if spike_count reaches 3 (repeated low-confidence = probably real)
+        existing_status = existing.get("status", "active")
+        new_confidence = new_data.get("confidence", "LOW")
+        if existing_status == "unconfirmed":
+            if new_confidence in ("HIGH", "MEDIUM") or new_count >= 3:
+                merged_status = "active"
+            else:
+                merged_status = "unconfirmed"
+        else:
+            merged_status = "active"
+
         conn.execute("""
             UPDATE attributors SET
                 last_active = ?,
@@ -339,7 +355,7 @@ class AttributorStore:
                 avg_magnitude = ?,
                 market_ids = ?,
                 spike_ids = ?,
-                status = 'active'
+                status = ?
             WHERE id = ?
         """, (
             new_data.get("last_active", datetime.now(timezone.utc).isoformat()),
@@ -348,11 +364,12 @@ class AttributorStore:
             round(new_avg, 4),
             json.dumps(merged_markets),
             json.dumps(merged_spikes),
+            merged_status,
             aid,
         ))
         conn.commit()
 
-        logger.info("Merged into attributor: %s (count=%d)", existing["name"][:50], new_count)
+        logger.info("Merged into attributor: %s (count=%d, status=%s)", existing["name"][:50], new_count, merged_status)
         return aid
 
     def get_attributor(self, attributor_id: str) -> Optional[Dict]:
@@ -367,19 +384,26 @@ class AttributorStore:
         d["spike_ids"] = json.loads(d.get("spike_ids", "[]"))
         return d
 
-    def get_active_attributors(self, category: str = None, limit: int = 50) -> List[Dict]:
-        """Get active attributors, optionally filtered by category."""
+    def get_active_attributors(self, category: str = None, limit: int = 50,
+                               include_unconfirmed: bool = False) -> List[Dict]:
+        """Get active attributors, optionally filtered by category.
+        
+        Args:
+            include_unconfirmed: If True, also returns 'unconfirmed' (LOW confidence) attributors.
+        """
         conn = self.db._get_conn()
         cols = [d[0] for d in conn.execute("PRAGMA table_info(attributors)").fetchall()]
 
+        statuses = "('active', 'unconfirmed')" if include_unconfirmed else "('active')"
+
         if category:
             rows = conn.execute(
-                "SELECT * FROM attributors WHERE status = 'active' AND category = ? ORDER BY last_active DESC LIMIT ?",
+                f"SELECT * FROM attributors WHERE status IN {statuses} AND category = ? ORDER BY last_active DESC LIMIT ?",
                 (category, limit)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM attributors WHERE status = 'active' ORDER BY last_active DESC LIMIT ?",
+                f"SELECT * FROM attributors WHERE status IN {statuses} ORDER BY last_active DESC LIMIT ?",
                 (limit,)
             ).fetchall()
 
