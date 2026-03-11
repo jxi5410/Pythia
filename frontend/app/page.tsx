@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import SpikeChart from '@/components/SpikeChart';
+import CausalGraphView from '@/components/CausalGraphView';
+import type { CausalGraphData } from '@/components/CausalGraphView';
 import type { SpikeAttributor } from '@/components/SpikeChart';
 
 interface MarketData {
@@ -281,6 +283,22 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMarket, setSelectedMarket] = useState<MarketData | null>(null);
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
+  const [showCausalGraph, setShowCausalGraph] = useState(false);
+  const [causalData, setCausalData] = useState<CausalGraphData | null>(null);
+  const [causalLoading, setCausalLoading] = useState(false);
+
+  // Fetch causal graph when toggled
+  useEffect(() => {
+    if (!showCausalGraph || !selectedMarket) { setCausalData(null); return; }
+    setCausalLoading(true);
+    fetch(`/api/causal-graph?market=${selectedMarket.id}`)
+      .then(r => r.json())
+      .then(d => { setCausalData({ nodes: d.nodes, edges: d.edges }); setCausalLoading(false); })
+      .catch(() => setCausalLoading(false));
+  }, [showCausalGraph, selectedMarket?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset causal graph when market changes
+  useEffect(() => { setShowCausalGraph(false); setCausalData(null); }, [selectedMarket?.id]);
 
   // Keep selectedMarket in sync with live updates
   useEffect(() => {
@@ -305,6 +323,42 @@ export default function Home() {
         <div style={{ maxWidth: 1180, margin: '0 auto' }}>
           <button onClick={() => setSelectedMarket(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: NO_C, fontSize: 13, fontWeight: 600, marginBottom: 14 }}>← Back</button>
           <HeroPanel market={selectedMarket} index={0} total={1} onPrev={() => setSelectedMarket(null)} onNext={() => setSelectedMarket(null)} prevName="" nextName="" bookmarked={bookmarks.has(selectedMarket.id)} onBookmark={() => toggleBM(selectedMarket.id)} onShare={() => share(selectedMarket)} lastUpdated={lastUpdated} />
+
+          {/* Deep Dive — Causal Graph toggle */}
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => setShowCausalGraph(p => !p)} style={{
+              background: showCausalGraph ? '#141413' : 'rgba(255,255,255,0.84)',
+              color: showCausalGraph ? '#faf9f5' : '#141413',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 10, padding: '10px 20px', cursor: 'pointer',
+              fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)',
+              backdropFilter: 'blur(10px)',
+              transition: 'all 0.2s',
+            }}>
+              {showCausalGraph ? '✕ Close' : '⚡ Deep Dive — Causal Graph'}
+            </button>
+          </div>
+
+          {showCausalGraph && (
+            <div className="hero-panel" style={{
+              marginTop: 12, padding: 0, overflow: 'visible',
+              minHeight: 520, position: 'relative',
+            }}>
+              <div style={{ padding: '14px 22px 0', flexShrink: 0 }}>
+                <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  Causal Analysis · {selectedMarket.question.slice(0, 50)}{selectedMarket.question.length > 50 ? '…' : ''}
+                </span>
+              </div>
+              {causalLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 460, color: 'var(--text-muted)', fontSize: 13 }}>
+                  <div className="loading-spinner" style={{ width: 20, height: 20, marginRight: 10 }} />
+                  Building causal graph…
+                </div>
+              ) : causalData ? (
+                <CausalGraphView data={causalData} width={1136} height={480} animated />
+              ) : null}
+            </div>
+          )}
         </div>
       ) : (
         <>
