@@ -1,150 +1,187 @@
 # Pythia
 
-**Narrative intelligence engine for prediction markets.**
+**Prediction market intelligence engine. Detects probability spikes, attributes their causes, and predicts downstream market effects.**
 
-Pythia detects probability spikes in prediction markets, identifies their causes as persistent **attributors**, and propagates forward signals to predict downstream market moves — before they happen.
+Built for institutional traders and quant researchers. Monitors Polymarket and Kalshi in real-time.
 
-## What It Does
+**Demo:** [pythia-demo.vercel.app](https://pythia-demo.vercel.app)
 
-1. **Monitors** — Polls Polymarket (CLOB) and Kalshi for real-time price and volume data
-2. **Detects** — Identifies probability spikes, volume anomalies, maker edge opportunities, and momentum breakouts
-3. **Attributes** — 8-layer hybrid statistical + LLM pipeline explains *why* a move happened, validated by Bayesian counterfactual analysis and causal DAGs
-4. **Predicts** — Walks the causal graph forward to generate actionable signals for downstream markets that haven't moved yet
-5. **Learns** — Tracks prediction accuracy, adjusts confidence from user feedback, retrains effect models weekly
+---
 
-## Pythia Causal Engine (PCE)
+## What Pythia Does
 
-The core differentiator. An 8-layer hybrid pipeline combining statistical causal inference with LLM reasoning:
+1. **Detects** — Monitors prediction markets for probability spikes (≥5% in 1h), volume anomalies (≥3x baseline), maker edge opportunities, and momentum breakouts
+2. **Attributes** — Identifies *why* a spike happened using a multi-layer causal pipeline: entity extraction → news retrieval → LLM relevance filtering → causal reasoning → statistical validation
+3. **Predicts** — Walks the causal graph forward to generate signals for downstream markets that haven't moved yet
+4. **Tracks** — Resolves predictions against actual prices. Measures hit rate, lead time, and calibration.
 
-| Layer | What | Method |
+---
+
+## Architecture
+
+```
+Detection → Attribution → Attributor Storage → Forward Signals → Track Record
+                │                                                      │
+           (fast or deep)                                              │
+                │                                                      │
+       ┌────────┴─────────┐                                           │
+       │   PCE (default)   │  3 LLM calls, ~$0.03/spike               │
+       │   causal_v2.py    │  Production path                         │
+       ├───────────────────┤                                           │
+       │   RCE (deep mode) │  ~35 LLM calls, ~$0.40/spike             │
+       │   rce_engine.py   │  Experimental — multi-agent debate        │
+       └──────────────────┘                                           │
+                                                                       │
+         Evaluated by track_record.py ◄────────────────────────────────┘
+```
+
+### Core Pipeline (Production)
+
+| Layer | Module | What |
 |---|---|---|
-| 1 | Context Builder | Keyword classification + entity extraction |
-| 1.5 | Counterfactual Validation | CausalImpact / z-score — filters false positives before LLM calls |
-| 2 | News Retrieval | Multi-source (NewsAPI, Google News, DuckDuckGo, Reddit) |
-| 3 | Candidate Filter | LLM relevance scoring (Sonnet) |
-| 4 | Causal Reasoning | LLM deep analysis (Opus) with statistical evidence |
-| 4.5 | DAG Refutation | DoWhy formal causal graphs + refutation tests per category |
-| 4.6 | Heterogeneous Effects | EconML CausalForestDML — predicts expected effect size by market type |
-| 5 | Store & Learn | Feedback loop, outcome tracking, model retraining |
+| Detection | `src/detection/detector.py` | 4 signal strategies: spike, volume, maker edge, momentum |
+| Context | `src/core/causal_v2.py` | Entity extraction, concurrent spike detection |
+| News Retrieval | `src/core/causal_v2.py` | NewsAPI, Google News RSS, DuckDuckGo, Reddit — temporal filtered |
+| LLM Filter | `src/core/causal_v2.py` | Sonnet scores candidate relevance |
+| Causal Reasoning | `src/core/causal_v2.py` | Opus determines most likely cause + confidence |
+| Statistical Validation | `src/core/counterfactual.py` | CausalImpact / z-score filters false positives |
+| DAG Refutation | `src/core/causal_dag.py` | DoWhy formal causal graphs + refutation tests |
+| Effect Prediction | `src/core/heterogeneous_effects.py` | EconML CausalForestDML predicts magnitude by market type |
+| Storage | `src/core/attributor_engine.py` | Persistent causal entities with 3-tier confidence (active/unconfirmed/eliminated) |
+| Propagation | `src/core/forward_signals.py` | PCMCI causal graph → downstream market predictions |
+| Evaluation | `src/core/track_record.py` | Hit rate, calibration, lead time, realized P&L |
 
-## Attributors & Forward Signals
+### RCE — Reverse Causal Engine (Experimental)
 
-**Attributors** are persistent causal entities — the fundamental intelligence unit.
+Multi-agent adversarial attribution inspired by MiroFish/OASIS simulation architecture. Higher accuracy on complex spikes, ~13x cost of PCE. Not yet wired into production — will be activated via `PYTHIA_ATTRIBUTION_MODE=deep` once evaluated against PCE on real spikes.
 
-When a spike occurs, PCE extracts an attributor (e.g., "Fed hawkish surprise"). That attributor is tracked across markets and time. When it fires, Pythia walks the PCMCI causal graph to predict which downstream markets will move, by how much, and when.
+| Module | What |
+|---|---|
+| `src/core/rce_ontology.py` | Rich entity-relationship extraction (12-20 typed entities vs PCE's 3-5 keywords) |
+| `src/core/rce_agents.py` | 7 agents: 5 domain specialists + 2 adversarial (Devil's Advocate, Null Hypothesis) |
+| `src/core/rce_engine.py` | Orchestrator: propose → debate (2 rounds) → counterfactual test → surviving attributors |
 
-**Forward signals** are time-stamped predictions: "Market B will move up ~3% within 2 hours because of attributor X in Market A." Signals have user-tunable confidence thresholds and are resolved against actual prices for accuracy tracking.
+### Frontend
+
+Next.js 16 dashboard deployed on Vercel.
+
+| Component | What |
+|---|---|
+| `frontend/app/page.tsx` | Hero panel with market carousel, category filters, market cards |
+| `frontend/components/SpikeChart.tsx` | 30-day price chart with spike detection, volume bars, crosshair tooltip, 3-tier attributor popups |
+| `frontend/components/CausalGraphView.tsx` | PCE pipeline visualization — shows elimination funnel from candidates to final attributors |
+
+---
 
 ## Quick Start
+
+### Backend
 
 ```bash
 pip install -r requirements.txt
 
-# Monitor mode — detect and alert only
+# Monitor mode — detect and alert
 python3 run.py
 
-# Automation mode — paper trading from signals
+# With paper trading automation
 python3 run.py --auto
 
-# Backfill historical spikes from Polymarket (recommended first run)
-python3 scripts/backfill_spikes.py --markets 50 --threshold 0.02
-
-# Retrain heterogeneous effects model
-python3 scripts/retrain_model.py
+# Backfill historical spikes (recommended first run)
+python3 scripts/backfill_spikes.py --markets 50
 
 # API server
 uvicorn src.core.api:app --reload
 ```
 
-## API
+### Frontend
 
-Intelligence endpoints (all under `/api/v1`):
-
-| Endpoint | What |
-|---|---|
-| `GET /analyze/{market_id}` | On-demand full analysis: price history + spikes + attributors + forward signals |
-| `GET /attributors` | List active/fading/resolved attributors |
-| `GET /markets/{id}/attributors` | Attributors linked to a specific market |
-| `GET /signals/forward` | Pending forward signal predictions |
-| `GET /narratives` | Auto-clustered narrative groups |
-| `POST /preferences/thresholds` | Set user confidence thresholds for spike/attribution/signal |
-| `GET /watchlists/{name}/signals` | Forward signals for watchlisted markets |
-| `POST /feedback` | Submit feedback for PCE self-learning |
-
-## Architecture
-
+```bash
+cd frontend && npm install && npm run dev
+# http://localhost:3000 — auto-deploys to Vercel on push
 ```
-pythia/
-├── run.py                           # Entry point
-├── config.json                      # Runtime configuration
-├── src/
-│   ├── core/
-│   │   ├── main.py                  # Orchestrator — polling + signal loop
-│   │   ├── api.py                   # FastAPI REST API
-│   │   ├── intelligence_api.py      # Attributor, signal, narrative endpoints
-│   │   ├── database.py              # SQLite persistence layer
-│   │   ├── causal_v2.py             # 8-layer PCE attribution pipeline
-│   │   ├── attributor_engine.py     # Persistent causal entities + lifecycle
-│   │   ├── forward_signals.py       # Causal graph propagation + predictions
-│   │   ├── counterfactual.py        # CausalImpact spike validation
-│   │   ├── causal_discovery.py      # PCMCI + Transfer Entropy
-│   │   ├── causal_dag.py            # DoWhy formal DAGs per category
-│   │   ├── heterogeneous_effects.py # EconML CausalForestDML
-│   │   ├── confluence.py            # Multi-layer signal convergence
-│   │   ├── calibration.py           # Brier score tracking
-│   │   └── cross_correlation.py     # Spearman + factor decomposition
-│   ├── detection/
-│   │   └── detector.py              # Signal detection (4 strategies)
-│   ├── connectors/
-│   │   ├── polymarket.py            # Polymarket CLOB API
-│   │   └── kalshi.py                # Kalshi event contracts API
-│   ├── trading/
-│   │   ├── paper_trading.py         # Simulated execution + P&L
-│   │   └── automation.py            # Auto-trade controller
-│   └── alerts/
-│       └── alerts.py                # Signal formatting
-├── frontend/                        # Next.js demo (Vercel)
-│   └── components/
-│       └── SpikeChart.tsx           # 30-day chart with spike overlay
-├── scripts/
-│   ├── backfill_spikes.py           # Historical spike ingestion from Polymarket
-│   └── retrain_model.py             # Weekly P3 model retraining
-└── tests/
+
+### LLM Configuration
+
+Supports multiple backends. Default: Qwen (cheapest).
+
+```bash
+# Copy .env.example to .env and set:
+PYTHIA_LLM_BACKEND=openai
+PYTHIA_LLM_API_KEY=sk-xxxxx
+PYTHIA_LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+PYTHIA_LLM_MODEL=qwen-plus
+PYTHIA_LLM_MODEL_STRONG=qwen-max
 ```
+
+| Provider | Cost/spike (PCE) | Cost/spike (RCE) |
+|---|---|---|
+| Qwen (recommended) | ~$0.03 | ~$0.40 |
+| DeepSeek | ~$0.02 | ~$0.30 |
+| Ollama (local) | $0 | $0 |
+| Claude | ~$0.30 | ~$3.00 |
+
+---
 
 ## Signal Types
 
-| Signal | What It Detects | Threshold |
-|---|---|---|
-| `PROBABILITY_SPIKE` | Large price moves in short windows | ≥2% in 2h |
-| `VOLUME_ANOMALY` | Unusual trading activity vs baseline | ≥3x normal volume |
-| `MAKER_EDGE` | Liquidity provision opportunities | ≥1% spread |
-| `MOMENTUM_BREAKOUT` | Trend continuation signals | MA crossover |
-| `CAUSAL_PROPAGATION` | Forward signal from attributor via causal graph | User-configurable |
+| Signal | Threshold |
+|---|---|
+| `PROBABILITY_SPIKE` | ≥5% in 1h |
+| `VOLUME_ANOMALY` | ≥3x normal volume |
+| `MAKER_EDGE` | ≥1% spread |
+| `MOMENTUM_BREAKOUT` | MA crossover |
+| `CAUSAL_PROPAGATION` | Forward signal via causal graph |
 
 ## Causal Inference Stack
 
 | Library | Purpose |
 |---|---|
-| Tigramite (PCMCI) | Directional causal discovery between markets |
-| Transfer Entropy | Information flow detection (lead-lag) |
-| pyCausalImpact | Bayesian counterfactual spike validation |
-| DoWhy | Formal causal DAGs with refutation tests |
-| EconML | Heterogeneous treatment effects by market type |
-
-## Data Sources
-
-- **Polymarket** — CLOB API for orderbook data + historical price series
-- **Kalshi** — Regulated event contracts
+| Tigramite (PCMCI) | Directional causal discovery |
+| pyCausalImpact | Bayesian counterfactual validation |
+| DoWhy | Formal causal DAGs + refutation |
+| EconML | Heterogeneous treatment effects |
+| Transfer Entropy | Information flow detection |
 
 ## Risk Controls (Paper Trading)
 
-- Half-Kelly position sizing (max 25% per trade)
-- Daily loss limit: 10%
-- Max drawdown: 20%
-- Max 10 trades/day
+- EVT-aware Kelly sizing (max 25%)
+- Daily loss limit: 10%, Max drawdown: 20%
+- Correlation penalty for concentrated exposure
 - Hourly portfolio snapshots
+
+---
+
+## Project Structure
+
+```
+pythia/
+├── src/
+│   ├── core/
+│   │   ├── main.py                    # Orchestrator
+│   │   ├── causal_v2.py              # PCE attribution (production)
+│   │   ├── rce_engine.py             # RCE attribution (experimental)
+│   │   ├── rce_agents.py             # Agent personas + debate
+│   │   ├── rce_ontology.py           # Entity-relationship extraction
+│   │   ├── attributor_engine.py       # Persistent causal entities
+│   │   ├── forward_signals.py         # Causal propagation
+│   │   ├── track_record.py           # Prediction accuracy
+│   │   ├── llm_integration.py         # Multi-backend LLM
+│   │   ├── counterfactual.py          # CausalImpact validation
+│   │   ├── causal_dag.py             # DoWhy DAGs
+│   │   ├── heterogeneous_effects.py   # EconML effects
+│   │   ├── intelligence_api.py        # REST endpoints
+│   │   └── database.py               # SQLite
+│   ├── detection/detector.py          # Signal detection
+│   ├── connectors/                    # Polymarket + Kalshi APIs
+│   ├── trading/                       # Paper trading + automation
+│   └── alerts/                        # Telegram notifications
+├── frontend/                          # Next.js 16 (Vercel)
+├── scripts/                           # Backfill + model retraining
+└── tests/
+```
+
+---
 
 ## Credits
 
-Built by XJ & Bangshan
+Built by **XJ (Jie Xi)** & **Bangshan**
