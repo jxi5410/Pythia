@@ -51,3 +51,6 @@ class Config:
     
     # Signal cooldown (seconds)
     SIGNAL_COOLDOWN = 300  # 5 minutes
+
+    # Attribution engine mode: fast (PCE), deep (RCE), shadow (PCE + RCE eval)
+    ATTRIBUTION_MODE = os.getenv("PYTHIA_ATTRIBUTION_MODE", "fast").strip().lower()

@@ -17,7 +17,8 @@ import pandas as pd
 from .connectors.polymarket import PolymarketConnector
 from .database import PythiaDB
 from .detector import SignalDetector, Signal
-from .causal_v2 import attribute_spike_v2
+from .attribution.adapters import PCEEngineAdapter, RCEEngineAdapter
+from .attribution.orchestrator import AttributionOrchestrator
 from .config import Config
 from .equities import correlate_spike, format_correlation_alert
 from .confluence import (
@@ -75,6 +76,20 @@ class Pipeline:
         self.dry_run = dry_run
         self._recent_spike_proxies: List[SpikeProxy] = []
         self._confluence_scorer = ConfluenceScorer(time_window_hours=4, min_layers=3)
+        self._attribution_orchestrator = AttributionOrchestrator(
+            mode=getattr(self.config, "ATTRIBUTION_MODE", "fast"),
+            engines={
+                "pce_v2": PCEEngineAdapter(
+                    entity_llm=llm_call,
+                    filter_llm=llm_call,
+                    reasoning_llm=llm_call,
+                ),
+                "rce_v1": RCEEngineAdapter(
+                    llm_call=llm_call,
+                    ontology_llm=llm_call,
+                ),
+            },
+        )
 
     def run_cycle(self) -> List[Dict]:
         """Run one polling cycle. Returns list of alert dicts."""
@@ -151,17 +166,15 @@ class Pipeline:
             })
             spike.id = spike_id
 
-            # Run causal attribution (v2)
+            # Run causal attribution via orchestrator (fast/deep/shadow)
             if not self.dry_run:
                 logger.info("Running causal attribution for: %s", spike.market_title[:60])
-                result = attribute_spike_v2(
+                attribution_result = self._attribution_orchestrator.attribute_spike(
                     spike=spike,
                     all_recent_spikes=self._recent_spike_proxies,
-                    entity_llm=llm_call,
-                    filter_llm=llm_call,
-                    reasoning_llm=llm_call,
                     db=self.db,
                 )
+                result = attribution_result.to_legacy_result()
             else:
                 result = {
                     "spike_id": spike_id,
