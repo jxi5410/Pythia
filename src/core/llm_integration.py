@@ -30,7 +30,19 @@ import logging
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Optional
+
+# Load .env from project root before reading any env vars
+try:
+    from dotenv import load_dotenv
+    # Walk up from this file to find .env at project root
+    _project_root = Path(__file__).resolve().parents[2]
+    _env_path = _project_root / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass  # python-dotenv not installed; rely on real env vars
 
 logger = logging.getLogger(__name__)
 
