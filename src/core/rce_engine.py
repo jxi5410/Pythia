@@ -157,18 +157,32 @@ def run_proposal_round(
     ontology: CausalOntology,
     evidence: Dict[str, List[Dict]],
     llm_call: Callable,
+    agent_evidence: Dict = None,
 ) -> List[CausalHypothesis]:
-    """Round 1: Each agent proposes causal hypotheses."""
+    """Round 1: Each agent proposes causal hypotheses.
+
+    If agent_evidence is provided (from rce_evidence_provider), each agent
+    gets domain-specific data + timing context in addition to shared news.
+    """
     all_hypotheses = []
     ontology_text = json.dumps([asdict(e) for e in ontology.entities[:15]], indent=2)
-    evidence_text = format_evidence_for_agent(evidence)
+    shared_evidence_text = format_evidence_for_agent(evidence)
 
     for agent in agents:
         # Tier 3 adversarial agents don't propose in Round 1
         if agent.tier == 3:
             continue
 
-        prompt = build_proposal_prompt(agent, spike_context, ontology_text, evidence_text)
+        # Build evidence text: domain-specific if available, else shared-only
+        if agent_evidence and agent.id in agent_evidence:
+            from .rce_evidence_provider import format_domain_evidence_for_prompt
+            ae = agent_evidence[agent.id]
+            domain_text = format_domain_evidence_for_prompt(ae)
+            full_evidence_text = f"{shared_evidence_text}\n\n{domain_text}"
+        else:
+            full_evidence_text = shared_evidence_text
+
+        prompt = build_proposal_prompt(agent, spike_context, ontology_text, full_evidence_text)
 
         try:
             response = llm_call(prompt)
@@ -186,6 +200,8 @@ def run_proposal_round(
                         confidence=float(h.get("confidence", 0.5)),
                         temporal_plausibility=h.get("temporal_plausibility", ""),
                         magnitude_plausibility=h.get("magnitude_plausibility", ""),
+                        impact_speed=h.get("impact_speed", ""),
+                        time_to_peak_impact=h.get("time_to_peak_impact", ""),
                         status="proposed",
                         round_proposed=1,
                     )
@@ -431,9 +447,27 @@ def attribute_spike_rce(
     agents = spawn_agents(category)
     logger.info("  Agents: %d total", len(agents))
 
+    # Step 4.5: Gather domain-specific evidence per agent
+    agent_evidence = None
+    try:
+        from .rce_evidence_provider import gather_all_agent_evidence
+        logger.info("Step 4.5: Gathering domain-specific evidence per agent...")
+        agent_evidence = gather_all_agent_evidence(
+            agents=agents,
+            spike_context=context,
+            shared_news=evidence.get("all", []),
+        )
+        n_domain = sum(len(ae.domain_data) for ae in agent_evidence.values())
+        logger.info("  Domain evidence: %d items across %d agents", n_domain, len(agent_evidence))
+    except ImportError:
+        logger.debug("rce_evidence_provider not available — agents get shared news only")
+    except Exception as e:
+        logger.warning("Domain evidence gathering failed (non-fatal): %s", e)
+
     # Step 5: Proposal round
     logger.info("Step 5: Proposal round...")
-    hypotheses = run_proposal_round(agents, context, ontology, evidence, llm_call)
+    hypotheses = run_proposal_round(agents, context, ontology, evidence, llm_call,
+                                     agent_evidence=agent_evidence)
     logger.info("  Proposals: %d hypotheses", len(hypotheses))
 
     # Step 6: Adversarial debate

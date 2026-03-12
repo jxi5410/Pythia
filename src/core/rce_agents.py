@@ -48,6 +48,9 @@ class CausalHypothesis:
     confidence: float = 0.5  # 0-1
     temporal_plausibility: str = ""  # "cause precedes effect by 2h"
     magnitude_plausibility: str = ""  # "magnitude is proportional to similar events"
+    impact_speed: str = ""  # "immediate", "fast", "delayed", "slow"
+    time_to_peak_impact: str = ""  # "2 hours", "3 days"
+    timing_assessment: str = ""  # "plausible", "implausible", "uncertain" — from critiques
     status: str = "proposed"  # proposed, supported, challenged, debunked, survived
     challenges: List[str] = field(default_factory=list)  # critiques from other agents
     rebuttals: List[str] = field(default_factory=list)  # responses to challenges
@@ -351,6 +354,18 @@ For each hypothesis, provide:
 4. confidence: Your honest confidence level (0.0 to 1.0)
 5. temporal_plausibility: Did the cause precede the effect? By how long?
 6. magnitude_plausibility: Is this cause big enough to explain the observed move?
+7. impact_speed: How quickly does this type of cause typically affect markets?
+   - "immediate" (minutes): data releases, breaking news, executive orders
+   - "fast" (hours): policy announcements, earnings, court rulings
+   - "delayed" (days): regulatory proposals, supply chain shifts, sentiment trends
+   - "slow" (weeks+): demographic shifts, technology adoption, structural changes
+8. time_to_peak_impact: Estimated hours/days until maximum market effect
+
+CRITICAL TIMING RULES:
+- A cause that happened AFTER the spike CANNOT have caused it.
+- "Concurrent" evidence is ambiguous — it could be the cause or a reaction. Be explicit.
+- If your hypothesis relies on a "delayed" cause, explain the transmission mechanism.
+- Weight "immediate" causes higher for sudden spikes; "delayed" causes for gradual trends.
 
 Return ONLY valid JSON:
 {{
@@ -362,7 +377,9 @@ Return ONLY valid JSON:
       "evidence_urls": ["url1"],
       "confidence": 0.7,
       "temporal_plausibility": "Cause preceded spike by ~2 hours",
-      "magnitude_plausibility": "Similar announcements have caused 3-8% moves historically"
+      "magnitude_plausibility": "Similar announcements have caused 3-8% moves historically",
+      "impact_speed": "immediate|fast|delayed|slow",
+      "time_to_peak_impact": "2 hours"
     }}
   ]
 }}
@@ -403,6 +420,10 @@ Consider:
 - What evidence would DISPROVE this hypothesis?
 - Are there cross-market implications that should be visible if this hypothesis is true?
 - Is the magnitude of the cause proportional to the spike?
+- TIMING: Does the claimed impact_speed match the observed spike timing?
+  An "immediate" cause should show effect within minutes.
+  A "delayed" cause needs a clear transmission mechanism to explain a sudden spike.
+  If the cause and spike are concurrent, is there evidence the cause came first?
 
 Return ONLY valid JSON:
 {{
@@ -410,7 +431,8 @@ Return ONLY valid JSON:
   "reasoning": "Detailed explanation of your critique",
   "counter_evidence": ["Specific evidence that weakens this hypothesis"],
   "alternative": "If debunking, what's a better explanation?",
-  "confidence_adjustment": 0.1
+  "confidence_adjustment": 0.1,
+  "timing_assessment": "plausible|implausible|uncertain"
 }}
 
 "support" = hypothesis is consistent with your domain evidence
