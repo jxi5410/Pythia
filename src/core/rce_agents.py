@@ -161,6 +161,48 @@ CORE_AGENTS = [
         evidence_sources=["twitter_x", "reddit", "telegram", "polymarket_comments", "crypto_twitter"],
         bias_warning="Sentiment is noisy; social media often reacts to price moves, not vice versa",
     ),
+    AgentPersona(
+        id="informed-flow",
+        name="Informed Flow Analyst",
+        tier=1,
+        domain="informed_flow",
+        description=(
+            "Detects whether a spike was driven by informed money (insiders, institutional edge) "
+            "versus uninformed retail flow. Analyzes order size distribution, timing of large trades "
+            "relative to news, and volume patterns to infer what type of participant initiated the move."
+        ),
+        reasoning_priors=[
+            "Block trades preceding public news indicate informed trading or leaked information",
+            "Retail flow follows news by 5-30 minutes; informed flow precedes or is concurrent",
+            "Single large orders in thin markets indicate whale conviction, not broad consensus",
+            "Gradual accumulation over hours suggests institutional positioning, not breaking news",
+            "Volume without news = someone knows something; news without volume = market already priced it in",
+            "Time-of-day matters: institutional activity peaks during business hours; retail peaks evenings/weekends",
+        ],
+        evidence_sources=["exchange_orderbook", "volume_data", "trade_size_distribution", "time_of_day_analysis"],
+        bias_warning="Not all pre-news trading is informed; some is coincidental or based on public signals the analyst missed",
+    ),
+    AgentPersona(
+        id="cross-market",
+        name="Cross-Market Contagion Analyst",
+        tier=1,
+        domain="cross_market",
+        description=(
+            "Determines whether a spike originated in this prediction market or propagated from "
+            "another market (Kalshi, equities, crypto, FX, derivatives). Checks lead-lag relationships, "
+            "arb bot signatures, and whether correlated assets moved first."
+        ),
+        reasoning_priors=[
+            "If SPY/BTC moved first and the prediction market followed, the cause is macro not contract-specific",
+            "Kalshi and Polymarket prices should converge; divergence suggests exchange-specific cause",
+            "Arb bot activity creates rapid mean-reversion; sustained divergence indicates new information",
+            "VIX spikes preceding prediction market moves suggest risk-off contagion, not political news",
+            "Currency moves (DXY, CNH) preceding political market moves suggest economic cause misattributed as political",
+            "If multiple unrelated prediction markets spike simultaneously, the cause is systemic not contract-specific",
+        ],
+        evidence_sources=["cross_market_prices", "equity_indices", "fx_pairs", "vix", "kalshi_arb"],
+        bias_warning="Cross-market correlation doesn't prove causation; markets can react independently to the same news",
+    ),
 ]
 
 
