@@ -289,13 +289,13 @@ function MiniChart({ prices, spikes, selectedSpike, onSpikeClick, width = 860, h
 // ─── Rich BACE Progress ──────────────────────────────────────────────
 function BACELive({ baceState }: { baceState: BACEState }) {
   const stepLabels = [
-    "Classifying market domain",
-    "Statistical significance test",
-    "Extracting entities & relationships",
-    "Gathering news & social evidence",
-    "Fetching domain-specific data",
+    "Building spike context",
+    "Extracting causal ontology",
+    "Gathering news evidence",
     "Spawning specialist agents",
-    "Agents generating hypotheses",
+    "Fetching domain-specific data",
+    "Agents proposing hypotheses",
+    "Adversarial debate rounds",
     "Counterfactual testing & synthesis",
   ];
 
@@ -606,75 +606,142 @@ export default function Pythia() {
     setIsLive(false);
 
     const question = selectedMarket?.question || "";
-    const states = generateBACEStates(spike, question);
-    setBaceState(states[0]);
+    // Initialize animation with basic state
+    setBaceState({ step: 0, entities: [], agentsActive: [], debateLog: [`Market: "${question.slice(0, 40)}…"`, "Connecting to BACE engine…"], counterfactualsTested: 0 });
 
-    // Start animation loop (runs regardless of backend)
-    let step = 0;
-    timerRef.current = setInterval(() => {
-      step++;
-      if (step < states.length) {
-        setBaceState(states[step]);
-      } else {
-        // Keep last state visible, loop the cursor blink to show it's still working
-        setBaceState(states[states.length - 1]);
-      }
-    }, 900 + Math.random() * 600);
-
-    // Try real backend directly (bypasses Next.js proxy timeout in dev mode)
     const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || "http://localhost:8000";
+
+    // Try SSE streaming first
     try {
-      const res = await fetch(`${backendUrl}/api/attribute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          spike: {
-            market_title: question,
-            market_id: selectedMarket?.id || "",
-            timestamp: spike.timestamp,
-            direction: spike.direction,
-            magnitude: spike.magnitude,
-            price_before: spike.priceBefore,
-            price_after: spike.priceAfter,
-            volume_at_spike: 0,
-          },
-          depth: 2,
-        }),
+      const params = new URLSearchParams({
+        market_title: question,
+        market_id: selectedMarket?.id || "",
+        timestamp: spike.timestamp,
+        direction: spike.direction,
+        magnitude: spike.magnitude.toString(),
+        price_before: spike.priceBefore.toString(),
+        price_after: spike.priceAfter.toString(),
+        depth: "2",
       });
 
-      if (timerRef.current) clearInterval(timerRef.current);
+      const res = await fetch(`${backendUrl}/api/attribute/stream?${params}`);
+      if (!res.ok || !res.body) throw new Error("SSE not available");
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.hypotheses?.length > 0) {
-          // Map backend response to frontend Hypothesis type
-          const hyps: Hypothesis[] = data.hypotheses.map((h: any) => ({
-            agent: h.agent || "Unknown",
-            agentRole: "",
-            cause: h.cause || "",
-            reasoning: h.reasoning || "",
-            confidence: typeof h.confidence === "number" ? h.confidence : 0.5,
-            confidenceFactors: "",
-            impactSpeed: h.impact_speed || "",
-            impactSpeedExplain: "",
-            timeToPeak: "",
-            timeToPeakExplain: "",
-            evidence: (h.evidence || []).map((e: any) => ({
-              source: e.source || "",
-              title: e.title || "",
-              url: e.url || null,
-              timestamp: e.timestamp || null,
-              timing: e.timing || "concurrent",
-            })),
-            counterfactual: h.counterfactual || "",
-          }));
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: any = null;
+      let currentStep = 0;
+      const liveEntities: string[] = [];
+      const liveAgents: string[] = [];
+      const liveLog: string[] = [];
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let eventType = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (eventType === "context") {
+                currentStep = 0;
+                liveLog.push(`Category: ${data.category}`);
+                if (data.entities?.length) {
+                  liveEntities.push(...data.entities);
+                  liveLog.push(`Initial entities: ${data.entities.join(", ")}`);
+                }
+              } else if (eventType === "ontology") {
+                currentStep = 1;
+                liveEntities.length = 0;
+                if (data.entities) liveEntities.push(...data.entities);
+                liveLog.push(`Ontology: ${data.entity_count} entities, ${data.relationship_count} relationships`);
+                liveLog.push(`Generated ${data.search_queries} search queries`);
+              } else if (eventType === "evidence") {
+                currentStep = 2;
+                liveLog.push(`News evidence: ${data.count} articles gathered`);
+              } else if (eventType === "agents") {
+                currentStep = 3;
+                liveAgents.length = 0;
+                for (const a of data.agents || []) liveAgents.push(a.name);
+                liveLog.push(`Spawned ${data.count} agents`);
+              } else if (eventType === "domain_evidence") {
+                currentStep = 4;
+                liveLog.push(`Domain evidence: ${data.count} items`);
+              } else if (eventType === "proposal") {
+                currentStep = 5;
+                const agentName = data.agent;
+                for (const h of data.hypotheses || []) {
+                  liveLog.push(`${agentName} → ${h.cause} (${Math.round(h.confidence * 100)}%)`);
+                }
+              } else if (eventType === "debate") {
+                currentStep = 6;
+                liveLog.push(`Debate round ${data.round}: ${data.surviving} surviving`);
+              } else if (eventType === "counterfactual") {
+                currentStep = 7;
+                liveLog.push(`Counterfactual testing: ${data.tested} hypotheses tested`);
+              } else if (eventType === "result") {
+                finalResult = data;
+              } else if (eventType === "error") {
+                throw new Error(data.error || "Backend error");
+              }
+
+              // Update animation state with real data
+              setBaceState({
+                step: currentStep,
+                entities: [...liveEntities],
+                agentsActive: [...liveAgents],
+                debateLog: liveLog.slice(-12), // show last 12 lines
+                counterfactualsTested: currentStep >= 7 ? 1 : 0,
+              });
+
+            } catch (parseErr) {
+              // Skip malformed events
+            }
+            eventType = "";
+          }
+        }
+      }
+
+      // Process final result
+      if (finalResult) {
+        const hyps: Hypothesis[] = (finalResult.hypotheses || []).map((h: any) => ({
+          agent: h.agent || "Unknown",
+          agentRole: "",
+          cause: h.cause || "",
+          reasoning: h.reasoning || "",
+          confidence: typeof h.confidence === "number" ? h.confidence : 0.5,
+          confidenceFactors: "",
+          impactSpeed: h.impact_speed || "",
+          impactSpeedExplain: "",
+          timeToPeak: "",
+          timeToPeakExplain: "",
+          evidence: (h.evidence || []).map((e: any) => ({
+            source: e.source || "",
+            title: e.title || "",
+            url: e.url || null,
+            timestamp: e.timestamp || null,
+            timing: e.timing || "concurrent",
+          })),
+          counterfactual: h.counterfactual || "",
+        }));
+
+        if (hyps.length > 0) {
+          const md = finalResult.bace_metadata || {};
           setAttribution({
-            depth: data.depth || 2,
-            agentsSpawned: data.agents_spawned || hyps.length,
-            hypothesesProposed: data.hypotheses_proposed || hyps.length,
-            debateRounds: data.debate_rounds || 0,
-            elapsed: data.elapsed_seconds || 0,
+            depth: md.depth || 2,
+            agentsSpawned: md.agents_spawned || hyps.length,
+            hypothesesProposed: md.hypotheses_proposed || hyps.length,
+            debateRounds: md.debate_rounds || 0,
+            elapsed: md.elapsed_seconds || 0,
             hypotheses: hyps,
           });
           setIsLive(true);
@@ -682,16 +749,25 @@ export default function Pythia() {
           return;
         }
       }
-      // Backend returned error or no data — fall through to mock
+      // If we got here, SSE didn't produce a usable result — fall through
     } catch {
-      // Backend not running — expected during local dev without server
-      if (timerRef.current) clearInterval(timerRef.current);
+      // SSE failed — backend not running or connection error
     }
 
-    // Fallback: use mock data
-    setAttribution(generateMockAttribution(spike, question));
-    setIsLive(false);
-    setPhase("result");
+    // Fallback: mock data with animation
+    const states = generateBACEStates(spike, question);
+    let mockStep = 0;
+    timerRef.current = setInterval(() => {
+      mockStep++;
+      if (mockStep < states.length) {
+        setBaceState(states[mockStep]);
+      } else if (mockStep === states.length) {
+        clearInterval(timerRef.current!);
+        setAttribution(generateMockAttribution(spike, question));
+        setIsLive(false);
+        setPhase("result");
+      }
+    }, 900 + Math.random() * 600);
   }, [selectedMarket]);
 
   useEffect(() => { return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, []);
