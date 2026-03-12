@@ -64,49 +64,53 @@ async function searchMarketBySlug(slug: string): Promise<any[]> {
 
 async function searchByKeyword(query: string): Promise<any[]> {
   const q = query.toLowerCase().trim();
-  const words = q.split(/\s+/).filter(w => w.length > 2);
+  const words = q.split(/\s+/).filter(w => w.length > 1);
+  if (words.length === 0) return getTopMarkets();
   const found: any[] = [];
+  const seenSlugs = new Set<string>();
 
-  // Search events (most markets are grouped under events)
-  try {
-    const res = await fetch(
-      `${GAMMA_URL}/events?limit=50&active=true&closed=false&order=volume24hr&ascending=false`
-    );
-    const events = await res.json();
-    if (Array.isArray(events)) {
-      for (const evt of events) {
-        const title = (evt.title || '').toLowerCase();
-        const evtSlug = (evt.slug || '').toLowerCase();
-        // Check if any search word appears in event title or slug
-        const match = words.some(w => title.includes(w) || evtSlug.includes(w));
-        if (match) {
-          for (const m of evt.markets || []) {
-            found.push(m);
-          }
-        }
-      }
-    }
-  } catch { /* continue */ }
+  const addMarket = (m: any) => {
+    const slug = m.slug || m.id || '';
+    if (!seenSlugs.has(slug)) { seenSlugs.add(slug); found.push(m); }
+  };
 
-  // If nothing from events, search markets directly
-  if (found.length === 0) {
+  // Search events AND markets in parallel for speed + coverage
+  const [eventsRes, marketsRes] = await Promise.allSettled([
+    fetch(`${GAMMA_URL}/events?limit=100&active=true&closed=false&order=volume24hr&ascending=false`),
+    fetch(`${GAMMA_URL}/markets?limit=200&active=true&closed=false&order=volume24hr&ascending=false`),
+  ]);
+
+  if (eventsRes.status === 'fulfilled') {
     try {
-      const res = await fetch(
-        `${GAMMA_URL}/markets?limit=50&active=true&closed=false&order=volume24hr&ascending=false`
-      );
-      const allMarkets = await res.json();
-      if (Array.isArray(allMarkets)) {
-        for (const m of allMarkets) {
-          const question = (m.question || '').toLowerCase();
-          const mSlug = (m.slug || '').toLowerCase();
-          if (words.some(w => question.includes(w) || mSlug.includes(w))) {
-            found.push(m);
+      const events = await eventsRes.value.json();
+      if (Array.isArray(events)) {
+        for (const evt of events) {
+          const title = (evt.title || '').toLowerCase();
+          const evtSlug = (evt.slug || '').toLowerCase();
+          if (words.some(w => title.includes(w) || evtSlug.includes(w))) {
+            for (const m of evt.markets || []) addMarket(m);
           }
         }
       }
     } catch { /* */ }
   }
 
+  if (marketsRes.status === 'fulfilled') {
+    try {
+      const allMarkets = await marketsRes.value.json();
+      if (Array.isArray(allMarkets)) {
+        for (const m of allMarkets) {
+          const question = (m.question || '').toLowerCase();
+          const mSlug = (m.slug || '').toLowerCase();
+          if (words.some(w => question.includes(w) || mSlug.includes(w))) {
+            addMarket(m);
+          }
+        }
+      }
+    } catch { /* */ }
+  }
+
+  found.sort((a: any, b: any) => (b.volume24hr || 0) - (a.volume24hr || 0));
   return found;
 }
 
