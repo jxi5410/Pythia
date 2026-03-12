@@ -311,8 +311,8 @@ export default function Pythia() {
         setPhase("idle"); return;
       }
 
-      if (data.markets.length === 1 || slug) {
-        // Direct match — load chart immediately
+      if (data.markets.length === 1) {
+        // Single result — load chart immediately
         await loadChart(data.markets[0]);
       } else {
         // Multiple results — let user pick
