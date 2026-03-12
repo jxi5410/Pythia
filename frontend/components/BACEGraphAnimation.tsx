@@ -78,8 +78,8 @@ const STEP_LABELS = [
   'Spawning agents',
   'Domain evidence',
   'Proposing hypotheses',
-  'Adversarial debate',
-  'Counterfactual testing',
+  'Cross-examination',
+  'Scoring & synthesis',
 ];
 
 // ─── Layout helpers ─────────────────────────────────────────────────

@@ -225,6 +225,9 @@ class HypothesisOut(BaseModel):
     evidence: list = []
     impact_speed: str = ""
     counterfactual: str = ""
+    time_to_peak: str = ""
+    temporal_plausibility: str = ""
+    magnitude_plausibility: str = ""
 
 class AttributeResponse(BaseModel):
     success: bool
@@ -296,7 +299,10 @@ def _extract_hypotheses(result: Dict) -> List[HypothesisOut]:
 
     for h in result.get("agent_hypotheses", []):
         ev_list = []
-        for e in h.get("evidence", []):
+        raw_evidence = h.get("evidence", [])
+        raw_urls = h.get("evidence_urls", [])
+
+        for idx, e in enumerate(raw_evidence):
             if isinstance(e, dict):
                 ev_list.append({
                     "source": e.get("source", ""),
@@ -305,17 +311,50 @@ def _extract_hypotheses(result: Dict) -> List[HypothesisOut]:
                     "timestamp": e.get("timestamp"),
                     "timing": e.get("timing", "concurrent"),
                 })
-            elif isinstance(e, str):
-                ev_list.append({"title": e})
+            elif isinstance(e, str) and len(e) > 3:
+                # String evidence from LLM — parse into structured form
+                url = raw_urls[idx] if idx < len(raw_urls) else None
+                # Try to extract source from common patterns
+                source = ""
+                timing = "concurrent"
+                for src in ["Reuters", "Bloomberg", "AP", "FOMC", "Fed", "SEC",
+                            "CFTC", "Twitter", "Reddit", "CME", "On-chain",
+                            "Orderbook", "congress.gov", "AP News", "BBC",
+                            "Statistical", "Equities", "Correlation"]:
+                    if src.lower() in e.lower():
+                        source = src
+                        break
+                # Infer timing from content
+                if any(w in e.lower() for w in ["before", "prior to", "ahead of", "preceded"]):
+                    timing = "before"
+                elif any(w in e.lower() for w in ["after", "following", "subsequent"]):
+                    timing = "after"
+
+                ev_list.append({
+                    "source": source,
+                    "title": e,
+                    "url": url,
+                    "timestamp": None,
+                    "timing": timing,
+                })
+
+        # Extract timing fields
+        timing_dict = h.get("timing", {}) if isinstance(h.get("timing"), dict) else {}
+        time_to_peak = h.get("time_to_peak", h.get("time_to_peak_impact", ""))
+        temporal = timing_dict.get("temporal_plausibility", h.get("temporal_plausibility", ""))
+        magnitude = h.get("magnitude_plausibility", "")
 
         hypotheses.append(HypothesisOut(
             agent=h.get("agent_name", h.get("agent", "Unknown")),
             cause=h.get("hypothesis", h.get("cause", "")),
             confidence=float(h.get("confidence", h.get("confidence_score", 0.5))),
             reasoning=h.get("reasoning", h.get("causal_chain", "")),
-            impact_speed=h.get("impact_speed", h.get("timing", {}).get("impact_speed", "") if isinstance(h.get("timing"), dict) else ""),
+            impact_speed=h.get("impact_speed", timing_dict.get("impact_speed", "")),
             counterfactual=h.get("counterfactual", ""),
             evidence=ev_list,
+            time_to_peak=time_to_peak,
+            temporal_plausibility=temporal,
+            magnitude_plausibility=magnitude,
         ))
 
     # Fallback for depth 1

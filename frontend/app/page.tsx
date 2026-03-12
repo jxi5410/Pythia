@@ -43,6 +43,7 @@ interface Attribution {
   depth: number; agentsSpawned: number;
   hypothesesProposed: number; debateRounds: number; elapsed: number;
   hypotheses: Hypothesis[];
+  governance?: { decision: string; reason: string; run_id?: string };
 }
 
 type Phase = "idle" | "searching" | "pick-market" | "loading-chart" | "chart" | "running-bace" | "result";
@@ -405,6 +406,16 @@ function ResultPanel({ attr, isLive }: { attr: Attribution; isLive: boolean }) {
         <span style={{ fontFamily: mono, fontSize: 10, color: isLive ? C.yes : C.accent }}>
           {isLive ? "● live attribution" : "⚠ simulated — backend not connected"}
         </span>
+        {isLive && attr.governance && (
+          <span style={{ fontFamily: mono, fontSize: 10, padding: "2px 6px", borderRadius: 3,
+            background: attr.governance.decision === "AUTO_RELAY" ? "#eef3e8" : attr.governance.decision === "FLAG_REVIEW" ? "#fdf5e6" : "#fdf0ed",
+            color: attr.governance.decision === "AUTO_RELAY" ? C.yes : attr.governance.decision === "FLAG_REVIEW" ? "#b8860b" : C.accent,
+            border: `1px solid ${attr.governance.decision === "AUTO_RELAY" ? C.yes + "40" : attr.governance.decision === "FLAG_REVIEW" ? "#b8860b40" : C.accent + "40"}`,
+          }}>
+            {attr.governance.decision === "AUTO_RELAY" ? "✓ Auto-approved" :
+             attr.governance.decision === "FLAG_REVIEW" ? "⚠ Flagged for review" : "✕ Rejected"}
+          </span>
+        )}
       </div>
 
       {/* All hypotheses */}
@@ -455,29 +466,37 @@ function ResultPanel({ attr, isLive }: { attr: Attribution; isLive: boolean }) {
                   <div style={{ fontSize: 13, color: "#5a5850", lineHeight: 1.6 }}>{h.reasoning}</div>
                 </div>
 
-                {/* Confidence explanation */}
+                {/* Confidence explanation — only show if we have data */}
+                {h.confidenceFactors && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontFamily: mono, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>
                     Why {(h.confidence * 100).toFixed(0)}% confidence?
                   </div>
                   <div style={{ fontSize: 13, color: "#5a5850", lineHeight: 1.6 }}>{h.confidenceFactors}</div>
                 </div>
+                )}
 
-                {/* Timing metadata — explained */}
+                {/* Timing metadata — only show sections with data */}
+                {(h.impactSpeed || h.timeToPeak) && (
                 <div style={{ display: "flex", gap: 20, flexWrap: "wrap" as const, marginBottom: 16 }}>
+                  {h.impactSpeed && (
                   <div style={{ flex: "1 1 200px" }}>
                     <div style={{ fontFamily: mono, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>
                       Impact speed: <strong style={{ color: C.dark }}>{h.impactSpeed}</strong>
                     </div>
-                    <div style={{ fontSize: 12, color: "#5a5850", lineHeight: 1.5 }}>{h.impactSpeedExplain}</div>
+                    {h.impactSpeedExplain && <div style={{ fontSize: 12, color: "#5a5850", lineHeight: 1.5 }}>{h.impactSpeedExplain}</div>}
                   </div>
+                  )}
+                  {h.timeToPeak && (
                   <div style={{ flex: "1 1 200px" }}>
                     <div style={{ fontFamily: mono, fontSize: 10, textTransform: "uppercase" as const, letterSpacing: 1, color: C.muted, marginBottom: 4 }}>
                       Time to peak: <strong style={{ color: C.dark }}>{h.timeToPeak}</strong>
                     </div>
-                    <div style={{ fontSize: 12, color: "#5a5850", lineHeight: 1.5 }}>{h.timeToPeakExplain}</div>
+                    {h.timeToPeakExplain && <div style={{ fontSize: 12, color: "#5a5850", lineHeight: 1.5 }}>{h.timeToPeakExplain}</div>}
                   </div>
+                  )}
                 </div>
+                )}
 
                 {/* Evidence */}
                 {h.evidence.length > 0 && (
@@ -794,11 +813,11 @@ export default function Pythia() {
           cause: h.cause || h.hypothesis || "",
           reasoning: h.reasoning || h.causal_chain || "",
           confidence: typeof h.confidence === "number" ? h.confidence : (typeof h.confidence_score === "number" ? h.confidence_score : 0.5),
-          confidenceFactors: h.confidenceFactors || "",
+          confidenceFactors: h.confidenceFactors || h.temporal_plausibility || "",
           impactSpeed: h.impact_speed || h.impactSpeed || "",
-          impactSpeedExplain: h.impactSpeedExplain || "",
+          impactSpeedExplain: h.impactSpeedExplain || h.magnitude_plausibility || "",
           timeToPeak: h.time_to_peak || h.timeToPeak || "",
-          timeToPeakExplain: h.timeToPeakExplain || "",
+          timeToPeakExplain: h.timeToPeakExplain || h.temporal_plausibility || "",
           evidence: (h.evidence || []).map((e: any) => ({
             source: e.source || "",
             title: e.title || e.headline || (typeof e === "string" ? e : ""),
@@ -811,6 +830,7 @@ export default function Pythia() {
 
         if (hyps.length > 0) {
           const md = finalResult.bace_metadata || {};
+          const gov = finalResult.governance;
           setAttribution({
             depth: md.depth || 2,
             agentsSpawned: md.agents_spawned || hyps.length,
@@ -818,6 +838,7 @@ export default function Pythia() {
             debateRounds: md.debate_rounds || 0,
             elapsed: md.elapsed_seconds || 0,
             hypotheses: hyps,
+            governance: gov ? { decision: gov.decision, reason: gov.reason, run_id: gov.run_id } : undefined,
           });
           setIsLive(true);
           setPhase("result");
