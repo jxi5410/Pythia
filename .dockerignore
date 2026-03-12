@@ -1,0 +1,15 @@
+frontend/
+.git/
+__pycache__/
+*.pyc
+.env
+.env.local
+data/
+*.db
+*.sqlite
+tests/
+docs/
+scripts/
+*.md
+.github/
+node_modules/
