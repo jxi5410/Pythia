@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir dowhy>=0.11 econml>=0.15.0 || true
 # Copy source
 COPY src/ src/
 
-# Expose port
+# Expose port (Railway sets PORT env var dynamically)
 EXPOSE 8000
 
-# Run the API server
-CMD ["uvicorn", "src.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the API server — use $PORT if set (Railway), else 8000
+CMD ["sh", "-c", "uvicorn src.api.server:app --host 0.0.0.0 --port ${PORT:-8000}"]
