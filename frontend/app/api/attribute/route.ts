@@ -10,6 +10,9 @@ import { NextRequest, NextResponse } from 'next/server';
  * Default: http://localhost:8000 (local dev)
  */
 
+// Allow up to 5 minutes for BACE attribution
+export const maxDuration = 300;
+
 const BACKEND_URL = process.env.PYTHIA_API_URL || 'http://localhost:8000';
 
 export async function POST(req: NextRequest) {
@@ -20,7 +23,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000), // 2 min timeout for deep attribution
+      signal: AbortSignal.timeout(300_000), // 5 min timeout for depth 2 with serial news fetching
     });
 
     if (!res.ok) {

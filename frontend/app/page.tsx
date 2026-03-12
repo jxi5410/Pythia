@@ -613,11 +613,10 @@ export default function Pythia() {
     let step = 0;
     timerRef.current = setInterval(() => {
       step++;
-      // Loop the last few steps if backend is still running
       if (step < states.length) {
         setBaceState(states[step]);
-      } else if (step < states.length + 20) {
-        // Keep the last state visible while waiting for backend
+      } else {
+        // Keep last state visible, loop the cursor blink to show it's still working
         setBaceState(states[states.length - 1]);
       }
     }, 900 + Math.random() * 600);
