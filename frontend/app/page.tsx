@@ -872,6 +872,13 @@ export default function Pythia() {
 
         {(phase === "chart" || phase === "running-bace" || phase === "result") && selectedMarket && (
           <div>
+            {searchResults.length > 1 && (
+              <button onClick={() => { setPhase("pick-market"); setSelectedMarket(null); setSelectedSpike(null); setAttribution(null); setPrices([]); setSpikes([]); }}
+                style={{ fontFamily: mono, fontSize: 11, color: C.info, background: "none", border: "none",
+                  cursor: "pointer", padding: "0 0 12px", display: "flex", alignItems: "center", gap: 4 }}>
+                ← Back to search results ({searchResults.length})
+              </button>
+            )}
             <div style={{ fontFamily: serif, fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
               {selectedMarket.question}
             </div>

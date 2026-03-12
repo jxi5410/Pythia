@@ -69,9 +69,15 @@ async def gather_evidence_parallel(ontology, spike_context: Dict) -> Dict[str, L
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_candidates = []
+    errors = 0
     for r in results:
         if isinstance(r, list):
             all_candidates.extend(r)
+        elif isinstance(r, Exception):
+            errors += 1
+    
+    if errors > 0:
+        logger.warning("Parallel news: %d/%d fetches failed", errors, len(tasks))
 
     # Temporal filtering
     window = spike_context.get("temporal_window", {})
@@ -204,7 +210,7 @@ async def run_proposals_parallel(agents, spike_context, ontology, evidence, llm_
                                 agent.id, hyp.cause_description[:60], hyp.confidence * 100)
             return agent.id, hyps
         except Exception as e:
-            logger.warning("Agent %s proposal failed: %s", agent.id, e)
+            logger.warning("Agent %s proposal failed: %s", agent.id, e, exc_info=True)
             return agent.id, []
 
     tasks = [propose_for_agent(a) for a in agents]
