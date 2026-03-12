@@ -362,7 +362,7 @@ export default function BACEGraphAnimation({ baceState, graphState }: BACEGraphA
 
         hyps.forEach((hyp, hi) => {
           const nodeId = `hyp-${agentId}-${hi}`;
-          if (existingIds.has(nodeId)) continue;
+          if (existingIds.has(nodeId)) return;
           const offset = (hi - (hyps.length - 1) / 2) * 25;
           newNodes.push({
             id: nodeId,
