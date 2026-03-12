@@ -157,7 +157,7 @@ async def gather_domain_evidence_parallel(agents, spike_context, shared_news):
 
 async def run_proposals_parallel(agents, spike_context, ontology, evidence, llm_call, agent_evidence=None):
     """Run all agent proposals concurrently."""
-    from .bace_agents import build_proposal_prompt, CausalHypothesis, MAX_HYPOTHESES_PER_AGENT
+    from .bace_agents import build_proposal_prompt, CausalHypothesis
     from .bace_debate import format_evidence_for_agent, _parse_json_response, MAX_HYPOTHESES_PER_AGENT
 
     ontology_text = json.dumps([asdict(e) for e in ontology.entities[:15]], indent=2)
