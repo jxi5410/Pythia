@@ -1,381 +1,643 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
-import SpikeChart from '@/components/SpikeChart';
-import CausalGraphView from '@/components/CausalGraphView';
-import type { CausalGraphData } from '@/components/CausalGraphView';
-import type { SpikeAttributor } from '@/components/SpikeChart';
+import { useState, useCallback, useRef, useEffect } from "react";
 
-interface MarketData {
-  id: string; question: string; category: string; probability: number;
-  previousProbability: number; volume24h: number; totalVolume: number;
-  liquidity: number; endDate: string; source: string; sourceUrl: string;
-  trending: boolean; tags: string[]; probabilityHistory: number[];
-  volumeHistory?: number[];
-  dataSource?: string; signal?: any;
-  spikeAttributors?: Record<number, SpikeAttributor[]>;
+// ─── Types ───────────────────────────────────────────────────────────
+interface PricePoint {
+  t: string;
+  price: number;
+  volume: number;
 }
 
-const CATEGORIES = [
-  { id: 'all', label: 'Trending' }, { id: 'fed', label: 'Macro' },
-  { id: 'crypto', label: 'Crypto' }, { id: 'tariffs', label: 'Trade' },
-  { id: 'geopolitical', label: 'World' }, { id: 'defense', label: 'Defense' },
-];
-const CAT_LABELS: Record<string, string> = {
-  fed: 'Economics · Macro', crypto: 'Crypto · Digital Assets',
-  tariffs: 'Trade · Tariffs', geopolitical: 'Geopolitical · World',
-  defense: 'Politics · Defense',
+interface Spike {
+  index: number;
+  timestamp: string;
+  magnitude: number;
+  direction: "up" | "down";
+  priceBefore: number;
+  priceAfter: number;
+}
+
+interface Hypothesis {
+  agent: string;
+  cause: string;
+  confidence: number;
+  chain: string;
+  impactSpeed: string;
+  timeToPeak: string;
+  evidence: string[];
+}
+
+interface Attribution {
+  mostLikelyCause: string;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  chain: string;
+  depth: number;
+  agentsSpawned: number;
+  hypothesesProposed: number;
+  debateRounds: number;
+  elapsed: number;
+  hypotheses: Hypothesis[];
+}
+
+type Phase = "idle" | "loading-market" | "chart" | "running-bace" | "result";
+
+// ─── Mock data (replace with real API) ───────────────────────────────
+function generateMockPrices(title: string): PricePoint[] {
+  const pts: PricePoint[] = [];
+  let price = 0.35 + Math.random() * 0.3;
+  const now = Date.now();
+  for (let i = 0; i < 720; i++) {
+    const t = new Date(now - (720 - i) * 3600000).toISOString();
+    const drift = (Math.random() - 0.48) * 0.008;
+    const shock = Math.random() < 0.02 ? (Math.random() - 0.3) * 0.12 : 0;
+    price = Math.max(0.01, Math.min(0.99, price + drift + shock));
+    const volume = Math.floor(5000 + Math.random() * 30000 + (shock !== 0 ? 80000 : 0));
+    pts.push({ t, price, volume });
+  }
+  return pts;
+}
+
+function detectSpikes(prices: PricePoint[], threshold = 0.05): Spike[] {
+  const spikes: Spike[] = [];
+  for (let i = 4; i < prices.length; i++) {
+    const before = prices[i - 4].price;
+    const after = prices[i].price;
+    const mag = Math.abs(after - before);
+    if (mag >= threshold) {
+      spikes.push({
+        index: i,
+        timestamp: prices[i].t,
+        magnitude: mag,
+        direction: after > before ? "up" : "down",
+        priceBefore: before,
+        priceAfter: after,
+      });
+    }
+  }
+  const deduped: Spike[] = [];
+  for (const s of spikes) {
+    const tooClose = deduped.some((d) => Math.abs(d.index - s.index) < 12);
+    if (!tooClose) deduped.push(s);
+  }
+  return deduped;
+}
+
+function generateMockAttribution(spike: Spike): Attribution {
+  const agents = [
+    "Macro Policy", "Market Structure", "Geopolitical", "Regulatory",
+    "Narrative & Sentiment", "Informed Flow", "Cross-Market"
+  ];
+  const causes = [
+    "FOMC minutes revealed hawkish dissent — 3 members favored 50bp hike",
+    "Whale accumulation: single address bought $2.3M in 45 minutes pre-news",
+    "Executive order draft leaked on X — tariff escalation on semiconductors",
+    "SEC enforcement action filed against major market maker",
+    "Viral Twitter thread by political insider shifted narrative",
+    "SPY dropped 1.8% triggering risk-off contagion across prediction markets",
+    "Unusual block trades preceded Reuters breaking news by 22 minutes",
+  ];
+  const hyps: Hypothesis[] = agents.map((a, i) => ({
+    agent: a,
+    cause: causes[i % causes.length],
+    confidence: Math.round((0.3 + Math.random() * 0.6) * 100) / 100,
+    chain: `${a} analysis → identified causal pattern → confirmed by evidence`,
+    impactSpeed: ["immediate", "fast", "delayed", "fast", "immediate", "fast", "immediate"][i],
+    timeToPeak: ["30 min", "2 hours", "1-2 days", "4 hours", "1 hour", "2 hours", "15 min"][i],
+    evidence: [`Source ${i + 1}a`, `Source ${i + 1}b`],
+  }));
+  hyps.sort((a, b) => b.confidence - a.confidence);
+  const best = hyps[0];
+  return {
+    mostLikelyCause: best.cause,
+    confidence: best.confidence >= 0.7 ? "HIGH" : best.confidence >= 0.4 ? "MEDIUM" : "LOW",
+    chain: best.chain,
+    depth: 2,
+    agentsSpawned: 9,
+    hypothesesProposed: hyps.length,
+    debateRounds: 0,
+    elapsed: 8.3 + Math.random() * 12,
+    hypotheses: hyps,
+  };
+}
+
+// ─── Colors ──────────────────────────────────────────────────────────
+const C = {
+  bg: "#faf9f5",
+  surface: "#FFFFFF",
+  dark: "#141413",
+  accent: "#d97757",
+  yes: "#788c5d",
+  muted: "#b0aea5",
+  border: "#e8e6dc",
+  info: "#6a9bcc",
+  faint: "#f5f4ef",
 };
 
-const YES_C = '#788c5d', NO_C = '#d97757';
-
-function fmtCurrency(v: number) { return v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${Math.round(v / 1e3).toLocaleString()}K` : `$${v}`; }
-function fmtEndDate(d: string) { return `Ends ${new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`; }
-function fmtDaysLeft(d: string) { const days = Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)); return days === 0 ? 'Ends today' : `${days}d left`; }
-function changePp(c: number, p: number) { return (c - p) * 100; }
-// Smart text shortener — condenses market questions to fit nav buttons
-function shorten(s: string, maxLen: number = 42): string {
-  if (s.length <= maxLen) return s;
-  // Step 1: Remove common filler
-  let t = s
-    .replace(/^Will (the )?/i, '')
-    .replace(/^Does (the )?/i, '')
-    .replace(/^Is (the )?/i, '')
-    .replace(/ by (the )?end of /i, ' by ')
-    .replace(/ before (the )?end of /i, ' before ')
-    .replace(/ at (the )?(March|April|May|June|July|August|September|October|November|December|January|February) \d{4} /i, (_, __, m) => ` at ${m.slice(0, 3)} `)
-    .replace(/ (January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})/gi, (_, m, y) => ` ${m.slice(0, 3)} ${y}`)
-    .replace(/ United States/gi, ' US')
-    .replace(/ President /gi, ' Pres. ')
-    .replace(/ government /gi, ' gov\'t ')
-    .replace(/ percent/gi, '%')
-    .replace(/ percentage points/gi, 'pp')
-    .replace(/ billion/gi, 'B')
-    .replace(/ million/gi, 'M')
-    .replace(/ cryptocurrency/gi, ' crypto')
-    .replace(/ agreement/gi, ' deal')
-    .replace(/ regulation/gi, ' reg.')
-    .replace(/ approximately/gi, ' ~')
-    .replace(/\?$/, '');
-  if (t.length <= maxLen) return t;
-  // Step 2: Truncate with ellipsis at word boundary
-  const words = t.split(' ');
-  let result = '';
-  for (const w of words) {
-    if ((result + ' ' + w).trim().length > maxLen - 1) break;
-    result = (result + ' ' + w).trim();
-  }
-  return result + '…';
-}
-
-function SourceLink({ source, url }: { source: string; url: string }) {
-  const isK = source.toLowerCase().includes('kalshi');
+// ─── Confidence badge ────────────────────────────────────────────────
+function ConfBadge({ level }: { level: string }) {
+  const color =
+    level === "HIGH" ? C.yes : level === "MEDIUM" ? C.accent : C.muted;
   return (
-    <a href={url || (isK ? 'https://kalshi.com' : 'https://polymarket.com')} target="_blank" rel="noopener noreferrer"
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-muted)', textDecoration: 'none' }}>
-      <span style={{ width: 18, height: 18, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, background: isK ? '#6a9bcc' : NO_C, color: 'white' }}>{isK ? 'K' : 'P'}</span>
-      {isK ? 'Kalshi' : 'Polymarket'}
-    </a>
-  );
-}
-
-// ── Live data hook — polls /api/markets every 30s ──
-function useLiveMarkets(interval: number = 30000) {
-  const [markets, setMarkets] = useState<MarketData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dataSource, setDataSource] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
-
-  const fetchData = useCallback(async () => {
-    try {
-      const r = await fetch('/api/markets?sort=volume');
-      const d = await r.json();
-      setMarkets(d.markets || []);
-      setDataSource(d.dataSource || '');
-      setLastUpdated(d.lastUpdated || new Date().toISOString());
-      setLoading(false);
-    } catch { setLoading(false); }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    const timer = setInterval(fetchData, interval);
-    return () => clearInterval(timer);
-  }, [fetchData, interval]);
-
-  return { markets, loading, dataSource, lastUpdated };
-}
-
-// ── Live pulse indicator ──
-function LivePulse() {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
-      <span style={{
-        width: 7, height: 7, borderRadius: '50%', background: YES_C,
-        boxShadow: `0 0 0 2px rgba(120,140,93,0.2)`,
-        animation: 'pulse-soft 2s ease-in-out infinite',
-      }} />
-      Live
+    <span
+      style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 11,
+        fontWeight: 700,
+        padding: "2px 8px",
+        borderRadius: 3,
+        background: color,
+        color: "#fff",
+        letterSpacing: 0.5,
+      }}
+    >
+      {level}
     </span>
   );
 }
 
-// ================================================================
-// Hero Panel
-// ================================================================
-const HERO_H = 480;
-
-function HeroPanel({ market, index, total, onPrev, onNext, prevName, nextName, bookmarked, onBookmark, onShare, lastUpdated }: {
-  market: MarketData; index: number; total: number;
-  onPrev: () => void; onNext: () => void;
-  prevName: string; nextName: string;
-  bookmarked: boolean; onBookmark: () => void; onShare: () => void;
-  lastUpdated: string;
+// ─── Mini Chart (SVG) ────────────────────────────────────────────────
+function MiniChart({
+  prices,
+  spikes,
+  selectedSpike,
+  onSpikeClick,
+  width = 860,
+  height = 280,
+}: {
+  prices: PricePoint[];
+  spikes: Spike[];
+  selectedSpike: Spike | null;
+  onSpikeClick: (s: Spike) => void;
+  width?: number;
+  height?: number;
 }) {
-  const prob = market.probability;
-  const paysYes = prob > 0.01 ? (1 / prob).toFixed(2) : '—';
-  const paysNo = prob < 0.99 ? (1 / (1 - prob)).toFixed(2) : '—';
+  const pad = { t: 20, r: 50, b: 30, l: 10 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  const pMin = Math.min(...prices.map((p) => p.price)) - 0.02;
+  const pMax = Math.max(...prices.map((p) => p.price)) + 0.02;
+  const x = (i: number) => pad.l + (i / (prices.length - 1)) * w;
+  const y = (p: number) => pad.t + (1 - (p - pMin) / (pMax - pMin)) * h;
+
+  const line = prices
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.price).toFixed(1)}`)
+    .join(" ");
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => pMin + f * (pMax - pMin));
 
   return (
-    <div>
-      <div className="hero-panel" style={{
-        flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
-        padding: 0, overflow: 'visible',
-        height: HERO_H, minHeight: HERO_H, maxHeight: HERO_H,
-      }}>
-        {/* Category + live indicator + icons */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 22px 0', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>{CAT_LABELS[market.category] || market.category}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={onShare} title="Share" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)', padding: 0 }}>↗</button>
-            <button onClick={onBookmark} title="Bookmark" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: bookmarked ? NO_C : 'var(--text-muted)', padding: 0 }}>{bookmarked ? '★' : '☆'}</button>
-          </div>
-        </div>
-
-        {/* Title */}
-        <div style={{ padding: '4px 22px 0', flexShrink: 0, textAlign: 'left' }}>
-          <div style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.2, color: 'var(--text-primary)', fontFamily: 'var(--font-display)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textAlign: 'left' }}>
-            {market.question}
-          </div>
-        </div>
-
-        {/* Body */}
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'visible' }}>
-          {/* Left — spaced out with justify-content */}
-          <div style={{ flex: '0 0 280px', padding: '20px 22px 12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            {/* Source + Live */}
-            <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <SourceLink source={market.source} url={market.sourceUrl} /><LivePulse />
-            </div>
-
-            {/* Odds table */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', flexShrink: 0, marginTop: 16 }}>
-              <thead>
-                <tr style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-                  <td style={{ padding: '0 0 6px' }}>Market</td>
-                  <td style={{ padding: '0 0 6px', textAlign: 'right' }}>Pays out</td>
-                  <td style={{ padding: '0 0 6px', textAlign: 'right' }}>Odds</td>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ color: YES_C, fontWeight: 600, fontSize: 14 }}>
-                  <td style={{ padding: '9px 0', borderTop: '1px solid var(--border-subtle)' }}>Yes<div style={{ height: 3, width: `${prob * 100}%`, maxWidth: '100%', background: YES_C, borderRadius: 2, marginTop: 3 }} /></td>
-                  <td style={{ padding: '9px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>{paysYes}x</td>
-                  <td style={{ padding: '9px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700 }}>{(prob * 100).toFixed(0)}%</td>
-                </tr>
-                <tr style={{ color: NO_C, fontWeight: 600, fontSize: 14 }}>
-                  <td style={{ padding: '9px 0', borderTop: '1px solid var(--border-subtle)' }}>No<div style={{ height: 3, width: `${(1 - prob) * 100}%`, maxWidth: '100%', background: NO_C, borderRadius: 2, marginTop: 3 }} /></td>
-                  <td style={{ padding: '9px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>{paysNo}x</td>
-                  <td style={{ padding: '9px 0', textAlign: 'right', borderTop: '1px solid var(--border-subtle)', fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700 }}>{((1 - prob) * 100).toFixed(0)}%</td>
-                </tr>
-              </tbody>
-            </table>
-
-            {/* Supplemental info */}
-            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>
-              <span style={{ fontWeight: 600 }}>{fmtCurrency(market.totalVolume)} Vol</span>
-              <span>{fmtEndDate(market.endDate)}</span>
-              <span>{fmtDaysLeft(market.endDate)}</span>
-            </div>
-          </div>
-
-          {/* Right: chart */}
-          <div style={{ flex: 1, padding: '12px 16px 14px 0', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'visible' }}>
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <SpikeChart data={market.probabilityHistory} volumeData={market.volumeHistory} height={330} width={860}
-                showSpikes spikeThreshold={0.035} interactive
-                spikeAttributors={market.spikeAttributors}
-                lastUpdated={lastUpdated} />
-            </div>
-          </div>
-        </div>
-
-        {/* Nav row — inside panel bottom */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '4px 22px 10px', borderTop: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {Array.from({ length: total }).map((_, i) => (
-              <span key={i} style={{ width: i === index ? 22 : 7, height: 7, borderRadius: 4, background: i === index ? NO_C : 'var(--border-default)', transition: 'width 0.3s, background 0.3s' }} />
-            ))}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
-            {prevName && <button onClick={onPrev} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px 0 0', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#b0aea5', width: 270, flexShrink: 0 }}><span style={{ fontSize: 18, lineHeight: 1, color: '#b0aea5' }}>‹</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(prevName)}</span></button>}
-            {prevName && nextName && <span style={{ width: 1, height: 16, background: 'var(--border-default)', flexShrink: 0 }} />}
-            {nextName && <button onClick={onNext} style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, padding: '0 0 0 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#b0aea5', fontWeight: 500, width: 270, flexShrink: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shorten(nextName)}</span><span style={{ fontSize: 18, lineHeight: 1, color: '#b0aea5' }}>›</span></button>}
-          </div>
-        </div>
-      </div>
-    </div>
+    <svg width={width} height={height} style={{ display: "block" }}>
+      {yTicks.map((tick, i) => (
+        <g key={i}>
+          <line x1={pad.l} x2={width - pad.r} y1={y(tick)} y2={y(tick)} stroke={C.border} strokeWidth={0.5} />
+          <text x={width - pad.r + 6} y={y(tick) + 4} fontSize={10} fontFamily="'JetBrains Mono', monospace" fill={C.muted}>
+            {(tick * 100).toFixed(0)}%
+          </text>
+        </g>
+      ))}
+      <path d={line} fill="none" stroke={C.dark} strokeWidth={1.5} />
+      {spikes.map((s, i) => {
+        const sx = x(s.index);
+        const sy = y(s.priceAfter);
+        const isSelected = selectedSpike?.index === s.index;
+        return (
+          <g key={i} onClick={() => onSpikeClick(s)} style={{ cursor: "pointer" }}>
+            <rect
+              x={sx - 8} y={pad.t} width={16} height={h}
+              fill={isSelected ? C.accent : C.faint}
+              opacity={isSelected ? 0.15 : 0}
+            />
+            <circle
+              cx={sx} cy={sy} r={isSelected ? 7 : 5}
+              fill={s.direction === "up" ? C.accent : C.info}
+              stroke={isSelected ? C.dark : "none"}
+              strokeWidth={isSelected ? 2 : 0}
+              opacity={0.9}
+            />
+            <text
+              x={sx} y={sy - 12}
+              textAnchor="middle" fontSize={10}
+              fontFamily="'JetBrains Mono', monospace"
+              fontWeight={700}
+              fill={s.direction === "up" ? C.accent : C.info}
+            >
+              {s.direction === "up" ? "+" : ""}{(s.magnitude * 100).toFixed(1)}%
+            </text>
+          </g>
+        );
+      })}
+      <text x={pad.l} y={height - 6} fontSize={10} fontFamily="'JetBrains Mono', monospace" fill={C.muted}>
+        {new Date(prices[0]?.t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+      </text>
+      <text x={width - pad.r} y={height - 6} textAnchor="end" fontSize={10} fontFamily="'JetBrains Mono', monospace" fill={C.muted}>
+        {new Date(prices[prices.length - 1]?.t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+      </text>
+    </svg>
   );
 }
 
-// ================================================================
-// Market Card
-// ================================================================
-function MarketCard({ market, onClick }: { market: MarketData; onClick: () => void }) {
-  const change = changePp(market.probability, market.previousProbability);
-  const pos = change >= 0;
+// ─── Progress Steps ──────────────────────────────────────────────────
+function BACEProgress({ step }: { step: number }) {
+  const steps = [
+    "Building context…",
+    "Statistical validation…",
+    "Extracting ontology…",
+    "Gathering news evidence…",
+    "Fetching domain data…",
+    "Spawning agents…",
+    "Agents proposing hypotheses…",
+    "Synthesizing…",
+  ];
   return (
-    <div className="exchange-card" onClick={onClick} style={{ cursor: 'pointer' }}>
-      <div className="exchange-card-header">
-        <div style={{ display: 'flex', gap: 6 }}><span className="venue-chip">{market.source.toUpperCase()}</span>{market.signal && <span className="signal-chip"><span className="signal-chip-dot" />SIGNAL</span>}</div>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtDaysLeft(market.endDate)}</span>
-      </div>
-      <div style={{ fontSize: 17, fontWeight: 660, letterSpacing: '-0.02em', lineHeight: 1.25, color: 'var(--text-primary)', minHeight: 50, marginBottom: 10, fontFamily: 'var(--font-display)' }}>{market.question}</div>
-      <div className="chart-shell">
-        <SpikeChart data={market.probabilityHistory} height={96} width={400} showSpikes spikeThreshold={0.05} interactive={false} />
-        <div className="chart-meta-row" style={{ marginTop: 4 }}>
-          <span className="meta-mono">{fmtCurrency(market.volume24h)} vol</span>
-          <span className={`price-move ${pos ? 'price-up' : 'price-down'}`}>{pos ? '+' : ''}{change.toFixed(1)}pp</span>
-        </div>
-      </div>
-      <div className="price-row" style={{ marginTop: 10 }}>
-        <div className="price-box" style={{ background: 'rgba(120,140,93,0.06)', borderColor: 'rgba(120,140,93,0.18)' }}><span className="price-label" style={{ color: YES_C }}>Yes</span><span className="price-value" style={{ color: YES_C }}>{(market.probability * 100).toFixed(0)}¢</span></div>
-        <div className="price-box"><span className="price-label">No</span><span className="price-value">{((1 - market.probability) * 100).toFixed(0)}¢</span></div>
-      </div>
-      <div className="card-foot"><span className="layer-tag">{fmtCurrency(market.liquidity)} liq</span>{market.tags.slice(0, 2).map(t => <span key={t} className="layer-tag">{t}</span>)}</div>
-      {market.signal && (
-        <div className="edge-strip">
-          <div className="edge-strip-head"><span className="edge-title">⚡ {market.signal.event}</span><span className={`severity-badge severity-badge-${market.signal.severity}`}>{market.signal.severity?.toUpperCase()}</span></div>
-          <div className="edge-strip-grid">
-            <div><div className="edge-kicker">Confidence</div><div className="edge-value">{((market.signal.confidenceScore || 0) * 100).toFixed(0)}%</div></div>
-            <div><div className="edge-kicker">Layers</div><div className="edge-value">{market.signal.confluenceLayers}/{market.signal.totalLayers}</div></div>
-            <div><div className="edge-kicker">Edge</div><div className="edge-value">{market.signal.edgeWindow}</div></div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ================================================================
-// Main
-// ================================================================
-export default function Home() {
-  const { markets, loading, dataSource, lastUpdated } = useLiveMarkets(30000);
-  const [heroIdx, setHeroIdx] = useState(0);
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedMarket, setSelectedMarket] = useState<MarketData | null>(null);
-  const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
-  const [showCausalGraph, setShowCausalGraph] = useState(false);
-  const [causalData, setCausalData] = useState<CausalGraphData | null>(null);
-  const [causalLoading, setCausalLoading] = useState(false);
-
-  // Fetch causal graph when toggled
-  useEffect(() => {
-    if (!showCausalGraph || !selectedMarket) { setCausalData(null); return; }
-    setCausalLoading(true);
-    fetch(`/api/causal-graph?market=${selectedMarket.id}`)
-      .then(r => r.json())
-      .then(d => { setCausalData({ nodes: d.nodes, edges: d.edges }); setCausalLoading(false); })
-      .catch(() => setCausalLoading(false));
-  }, [showCausalGraph, selectedMarket?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset causal graph when market changes
-  useEffect(() => { setShowCausalGraph(false); setCausalData(null); }, [selectedMarket?.id]);
-
-  // Keep selectedMarket in sync with live updates
-  useEffect(() => {
-    if (selectedMarket) {
-      const fresh = markets.find(m => m.id === selectedMarket.id);
-      if (fresh) setSelectedMarket(fresh);
-    }
-  }, [markets]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const hm = markets.filter(m => m.trending || m.signal);
-  const toggleBM = (id: string) => setBookmarks(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const share = (m: MarketData) => { const t = `${m.question} — ${(m.probability * 100).toFixed(0)}% | Pythia`; navigator.share ? navigator.share({ title: 'Pythia', text: t, url: location.href }).catch(() => {}) : navigator.clipboard?.writeText(t); };
-  const filtered = markets.filter(m => { if (activeCategory !== 'all' && m.category !== activeCategory) return false; if (searchQuery && !m.question.toLowerCase().includes(searchQuery.toLowerCase())) return false; return true; });
-  const cats = [...new Set(filtered.map(m => m.category))];
-  const hL = hm.length, sI = hL > 0 ? ((heroIdx % hL) + hL) % hL : 0, pI = hL > 0 ? ((sI - 1) + hL) % hL : 0, nI = hL > 0 ? (sI + 1) % hL : 0;
-
-  if (loading) return <div className="market-shell"><div className="loading-shell"><div className="loading-spinner" /><div className="loading-text">Loading markets...</div></div></div>;
-
-  return (
-    <div className="market-shell">
-      {selectedMarket ? (
-        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-          <button onClick={() => setSelectedMarket(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: NO_C, fontSize: 13, fontWeight: 600, marginBottom: 14 }}>← Back</button>
-          <HeroPanel market={selectedMarket} index={0} total={1} onPrev={() => setSelectedMarket(null)} onNext={() => setSelectedMarket(null)} prevName="" nextName="" bookmarked={bookmarks.has(selectedMarket.id)} onBookmark={() => toggleBM(selectedMarket.id)} onShare={() => share(selectedMarket)} lastUpdated={lastUpdated} />
-
-          {/* Deep Dive — Causal Graph toggle */}
-          <div style={{ marginTop: 16 }}>
-            <button onClick={() => setShowCausalGraph(p => !p)} style={{
-              background: showCausalGraph ? '#141413' : 'rgba(255,255,255,0.84)',
-              color: showCausalGraph ? '#faf9f5' : '#141413',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 10, padding: '10px 20px', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)',
-              backdropFilter: 'blur(10px)',
-              transition: 'all 0.2s',
+    <div style={{ padding: "32px 0" }}>
+      {steps.map((label, i) => {
+        const done = i < step;
+        const active = i === step;
+        return (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "6px 0",
+              opacity: done ? 1 : active ? 1 : 0.3,
+              transition: "opacity 0.4s",
+            }}
+          >
+            <span
+              style={{
+                width: 20, height: 20, borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontWeight: 700,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: done ? C.yes : active ? C.accent : C.border,
+                color: done || active ? "#fff" : C.muted,
+                transition: "background 0.3s",
+              }}
+            >
+              {done ? "✓" : i + 1}
+            </span>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 13,
+              color: active ? C.dark : done ? C.muted : C.border,
+              fontWeight: active ? 600 : 400,
             }}>
-              {showCausalGraph ? '✕ Close' : '⚡ Deep Dive — Causal Graph'}
+              {label}
+            </span>
+            {active && (
+              <span style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: C.accent,
+                animation: "pulse 1s infinite",
+              }} />
+            )}
+          </div>
+        );
+      })}
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+    </div>
+  );
+}
+
+// ─── Result Panel ────────────────────────────────────────────────────
+function ResultPanel({ attr, spike }: { attr: Attribution; spike: Spike }) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+  return (
+    <div style={{ padding: "24px 0" }}>
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`,
+        borderRadius: 8, padding: "20px 24px", marginBottom: 20,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <ConfBadge level={attr.confidence} />
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.muted }}>
+            Depth {attr.depth} · {attr.agentsSpawned} agents · {attr.elapsed.toFixed(1)}s
+          </span>
+        </div>
+        <div style={{
+          fontFamily: "'Newsreader', 'Source Serif 4', Georgia, serif",
+          fontSize: 20, fontWeight: 600, lineHeight: 1.4, color: C.dark,
+          marginBottom: 8,
+        }}>
+          {attr.mostLikelyCause}
+        </div>
+        <div style={{ fontSize: 13, color: "#5a5850", lineHeight: 1.6 }}>
+          {attr.chain}
+        </div>
+      </div>
+
+      <div style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const,
+        letterSpacing: 1, color: C.muted, marginBottom: 12,
+      }}>
+        All Agent Hypotheses ({attr.hypotheses.length})
+      </div>
+
+      {attr.hypotheses.map((h, i) => {
+        const isTop = i === 0;
+        const isOpen = expanded === i;
+        return (
+          <div
+            key={i}
+            onClick={() => setExpanded(isOpen ? null : i)}
+            style={{
+              background: isTop ? "#f8f5f0" : C.surface,
+              border: `1px solid ${isTop ? C.accent + "40" : C.border}`,
+              borderRadius: 6, padding: "14px 18px",
+              marginBottom: 8, cursor: "pointer",
+              transition: "border-color 0.2s",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{
+                width: 40, height: 6, borderRadius: 3,
+                background: C.border, overflow: "hidden", flexShrink: 0,
+              }}>
+                <div style={{
+                  width: `${h.confidence * 100}%`, height: "100%", borderRadius: 3,
+                  background: h.confidence >= 0.7 ? C.yes : h.confidence >= 0.4 ? C.accent : C.muted,
+                }} />
+              </div>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11, color: C.muted, width: 36, flexShrink: 0,
+              }}>
+                {(h.confidence * 100).toFixed(0)}%
+              </span>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11, fontWeight: 600, color: C.info,
+                width: 140, flexShrink: 0,
+              }}>
+                {h.agent}
+              </span>
+              <span style={{
+                fontSize: 13, color: C.dark, flex: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+              }}>
+                {h.cause}
+              </span>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 10, color: C.muted, flexShrink: 0,
+              }}>
+                {h.impactSpeed}
+              </span>
+            </div>
+
+            {isOpen && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 13, color: "#5a5850", lineHeight: 1.6, marginBottom: 8 }}>
+                  {h.chain}
+                </div>
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" as const }}>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.muted }}>
+                    Speed: <strong style={{ color: C.dark }}>{h.impactSpeed}</strong>
+                  </span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.muted }}>
+                    Peak impact: <strong style={{ color: C.dark }}>{h.timeToPeak}</strong>
+                  </span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.muted }}>
+                    Evidence: <strong style={{ color: C.dark }}>{h.evidence.length} sources</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────────────────
+export default function Pythia() {
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [input, setInput] = useState("");
+  const [marketTitle, setMarketTitle] = useState("");
+  const [prices, setPrices] = useState<PricePoint[]>([]);
+  const [spikes, setSpikes] = useState<Spike[]>([]);
+  const [selectedSpike, setSelectedSpike] = useState<Spike | null>(null);
+  const [baceStep, setBaceStep] = useState(0);
+  const [attribution, setAttribution] = useState<Attribution | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadMarket = useCallback(() => {
+    if (!input.trim()) return;
+    setPhase("loading-market");
+    setSelectedSpike(null);
+    setAttribution(null);
+
+    let title = input.trim();
+    if (title.includes("polymarket.com")) {
+      const parts = title.split("/").pop()?.replace(/-/g, " ") || "Market";
+      title = parts.charAt(0).toUpperCase() + parts.slice(1);
+    }
+    setMarketTitle(title);
+
+    setTimeout(() => {
+      const p = generateMockPrices(title);
+      setPrices(p);
+      setSpikes(detectSpikes(p));
+      setPhase("chart");
+    }, 800);
+  }, [input]);
+
+  const runBACE = useCallback((spike: Spike) => {
+    setSelectedSpike(spike);
+    setPhase("running-bace");
+    setBaceStep(0);
+    setAttribution(null);
+
+    let step = 0;
+    timerRef.current = setInterval(() => {
+      step++;
+      if (step >= 8) {
+        clearInterval(timerRef.current!);
+        const result = generateMockAttribution(spike);
+        setAttribution(result);
+        setPhase("result");
+      } else {
+        setBaceStep(step);
+      }
+    }, 600 + Math.random() * 400);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: C.bg,
+      fontFamily: "'Source Serif 4', Georgia, serif", color: C.dark,
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "24px 40px",
+        borderBottom: `1px solid ${C.border}`,
+        display: "flex", alignItems: "baseline", gap: 16,
+      }}>
+        <span style={{
+          fontSize: 22, fontWeight: 700, letterSpacing: -0.5,
+          fontFamily: "'Newsreader', 'Source Serif 4', Georgia, serif",
+        }}>
+          Pythia
+        </span>
+        <span style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 11, color: C.muted, letterSpacing: 0.5,
+        }}>
+          BACKWARD ATTRIBUTION CAUSAL ENGINE
+        </span>
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px" }}>
+
+        {/* Input bar */}
+        <div style={{ marginBottom: 32 }}>
+          <div style={{
+            fontSize: 15, color: C.muted, marginBottom: 12,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            Paste a Polymarket or Kalshi URL, or type a market name
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && loadMarket()}
+              placeholder="https://polymarket.com/event/will-trump-win-2024"
+              style={{
+                flex: 1, padding: "12px 16px",
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                fontSize: 15, fontFamily: "'Source Serif 4', Georgia, serif",
+                background: C.surface, color: C.dark,
+                outline: "none",
+              }}
+            />
+            <button
+              onClick={loadMarket}
+              disabled={!input.trim() || phase === "loading-market"}
+              style={{
+                padding: "12px 28px", borderRadius: 6,
+                border: "none", background: C.dark, color: C.bg,
+                fontSize: 14, fontWeight: 600, cursor: "pointer",
+                fontFamily: "'JetBrains Mono', monospace",
+                opacity: !input.trim() ? 0.4 : 1,
+              }}
+            >
+              {phase === "loading-market" ? "Loading…" : "Analyze"}
             </button>
           </div>
-
-          {showCausalGraph && (
-            <div className="hero-panel" style={{
-              marginTop: 12, padding: 0, overflow: 'visible',
-              minHeight: 520, position: 'relative',
-            }}>
-              <div style={{ padding: '14px 22px 0', flexShrink: 0 }}>
-                <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  Causal Analysis · {selectedMarket.question.slice(0, 50)}{selectedMarket.question.length > 50 ? '…' : ''}
-                </span>
-              </div>
-              {causalLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 460, color: 'var(--text-muted)', fontSize: 13 }}>
-                  <div className="loading-spinner" style={{ width: 20, height: 20, marginRight: 10 }} />
-                  Building causal graph…
-                </div>
-              ) : causalData ? (
-                <CausalGraphView data={causalData} width={1136} height={480} animated />
-              ) : null}
-            </div>
-          )}
         </div>
-      ) : (
-        <>
-          {hm.length > 0 && <HeroPanel market={hm[sI]} index={sI} total={hL} onPrev={() => setHeroIdx(pI)} onNext={() => setHeroIdx(nI)} prevName={hm[pI]?.question || ''} nextName={hm[nI]?.question || ''} bookmarked={bookmarks.has(hm[sI]?.id)} onBookmark={() => toggleBM(hm[sI]?.id)} onShare={() => share(hm[sI])} lastUpdated={lastUpdated} />}
-          <div className="control-bar" style={{ marginTop: 16 }}>
-            <div className="filter-row">{CATEGORIES.map(c => <button key={c.id} className={`filter-chip ${activeCategory === c.id ? 'filter-chip-active' : ''}`} onClick={() => setActiveCategory(c.id)}>{c.label}</button>)}</div>
-            <div style={{ position: 'relative', flex: '0 1 380px' }}><input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search events..." style={{ width: '100%', padding: '10px 14px 10px 34px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', fontSize: 13, color: 'var(--text-primary)', outline: 'none' }} /><span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: 13 }}>⌕</span></div>
+
+        {/* Loading state */}
+        {phase === "loading-market" && (
+          <div style={{ textAlign: "center" as const, padding: 60, color: C.muted }}>
+            <div style={{
+              width: 24, height: 24, border: `2px solid ${C.border}`,
+              borderTopColor: C.accent, borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+              margin: "0 auto 16px",
+            }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            Fetching market data…
           </div>
-          {activeCategory === 'all' ? cats.map(cat => {
-            const cm = filtered.filter(m => m.category === cat); if (!cm.length) return null;
-            const lb = CATEGORIES.find(c => c.id === cat)?.label || cat.charAt(0).toUpperCase() + cat.slice(1);
-            return <div key={cat} style={{ maxWidth: 1180, margin: '0 auto 28px' }}><div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.03em', marginBottom: 14, fontFamily: 'var(--font-display)' }}>{lb} <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>›</span></div><div className="cards-grid">{cm.map(m => <MarketCard key={m.id} market={m} onClick={() => setSelectedMarket(m)} />)}</div></div>;
-          }) : <div className="cards-grid">{filtered.map(m => <MarketCard key={m.id} market={m} onClick={() => setSelectedMarket(m)} />)}</div>}
-          {filtered.length === 0 && <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>No markets found.</div>}
-          <div style={{ maxWidth: 1180, margin: '20px auto 0', textAlign: 'center' }}><span className="data-pill">{dataSource === 'live' ? '● Live' : '◌ Demo'} · Pythia PCE</span></div>
-        </>
-      )}
+        )}
+
+        {/* Chart + results */}
+        {(phase === "chart" || phase === "running-bace" || phase === "result") && (
+          <div>
+            <div style={{
+              fontFamily: "'Newsreader', 'Source Serif 4', Georgia, serif",
+              fontSize: 24, fontWeight: 700, marginBottom: 4,
+            }}>
+              {marketTitle}
+            </div>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 11, color: C.muted, marginBottom: 20,
+            }}>
+              {prices.length} hours · {spikes.length} spikes detected · Click a spike to attribute
+            </div>
+
+            <div style={{
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: "16px 12px", marginBottom: 24,
+              overflowX: "auto" as const,
+            }}>
+              <MiniChart
+                prices={prices}
+                spikes={spikes}
+                selectedSpike={selectedSpike}
+                onSpikeClick={runBACE}
+              />
+            </div>
+
+            {selectedSpike && phase === "running-bace" && (
+              <div style={{
+                background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: "20px 24px",
+              }}>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const,
+                  letterSpacing: 1, color: C.muted, marginBottom: 8,
+                }}>
+                  Running BACE depth 2 on spike
+                </div>
+                <div style={{ fontSize: 15, marginBottom: 4 }}>
+                  <span style={{
+                    color: selectedSpike.direction === "up" ? C.accent : C.info,
+                    fontWeight: 700,
+                  }}>
+                    {selectedSpike.direction === "up" ? "+" : ""}
+                    {(selectedSpike.magnitude * 100).toFixed(1)}%
+                  </span>
+                  {" "}at {new Date(selectedSpike.timestamp).toLocaleString("en-US", {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                  })}
+                </div>
+                <BACEProgress step={baceStep} />
+              </div>
+            )}
+
+            {phase === "result" && attribution && selectedSpike && (
+              <ResultPanel attr={attribution} spike={selectedSpike} />
+            )}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {phase === "idle" && (
+          <div style={{
+            textAlign: "center" as const, padding: "80px 0",
+            color: C.muted,
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>
+              ⚡
+            </div>
+            <div style={{
+              fontFamily: "'Newsreader', 'Source Serif 4', Georgia, serif",
+              fontSize: 20, fontWeight: 600, color: C.dark, marginBottom: 8,
+            }}>
+              Why did this spike happen?
+            </div>
+            <div style={{ fontSize: 14, maxWidth: 400, margin: "0 auto", lineHeight: 1.6 }}>
+              Paste a prediction market URL above. Pythia will show you the price history,
+              detect spikes, and tell you what caused each one — with confidence levels
+              and evidence from 9 specialized agents.
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
