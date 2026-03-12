@@ -24,7 +24,7 @@ from .calibration import CalibrationTracker
 from .cross_correlation import CrossCorrelationEngine
 from .risk_engine import EVTRiskModel, StressTestEngine
 
-# Governance layer — mandatory for compliance (Singapore IMDA + UC Berkeley)
+# Governance layer — mandatory for enterprise compliance
 from .governance import init_governance, GovernanceConfig, get_governance
 from .bace import attribute_spike_with_governance
 GOVERNANCE_ENABLED = True

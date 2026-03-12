@@ -9,12 +9,17 @@ Design principles:
   4. All agent actions are logged with cost, latency, and confidence
   5. Governance config is externalizable (YAML/env) for enterprise deployment
 
-Framework references:
-  - Singapore IMDA Model AI Governance (risk assessment, transparency, accountability)
-  - UC Berkeley BAIR Autonomy Levels (L0-L5 bounded delegation)
-  - NIST AI Risk Management Framework (measure, manage, govern)
+Jurisdiction-agnostic: thresholds and controls are configurable per deployment.
+No assumptions about specific regulatory regimes. Enterprise customers overlay
+their own compliance requirements via governance.yaml or PYTHIA_GOV_* env vars.
 
-Autonomy Levels:
+Influenced by general AI governance best practices:
+  - Risk assessment and cost bounding (circuit breakers)
+  - Human-in-the-loop checkpoints (decision gates with autonomy levels)
+  - Audit trails and reproducibility (immutable action logging)
+  - Defense-in-depth (multi-factor validation, adversarial checks)
+
+Autonomy Levels (L0-L5):
   L0: No autonomy (human-controlled)
   L1-L2: Bounded suggestions with approvals
   L3: Limited autonomy on narrow tasks with checkpoints
@@ -39,7 +44,7 @@ logger = logging.getLogger(__name__)
 # ─── Enums ───────────────────────────────────────────────────────────
 
 class AutonomyLevel(IntEnum):
-    """UC Berkeley autonomy classification."""
+    """Autonomy level classification for agent roles."""
     L0_NO_AUTONOMY = 0
     L1_BOUNDED_SUGGESTIONS = 1
     L2_TOOL_USE_WITH_APPROVAL = 2
