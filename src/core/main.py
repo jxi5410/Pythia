@@ -26,7 +26,7 @@ from .risk_engine import EVTRiskModel, StressTestEngine
 
 # Governance layer — mandatory for compliance (Singapore IMDA + UC Berkeley)
 from .governance import init_governance, GovernanceConfig, get_governance
-from .causal_v2 import attribute_spike_with_governance
+from .bace import attribute_spike_with_governance
 GOVERNANCE_ENABLED = True
 
 # Import connectors
@@ -628,7 +628,7 @@ class PythiaLive:
                 
                 # Governance-wrapped attribution (mandatory)
                 try:
-                    result, audit_trail = attribute_spike_with_governance(spike)
+                    result, audit_trail = attribute_spike_with_governance(spike, db=self.db, depth=self.config.BACE_DEPTH)
 
                     # Check decision gate
                     decision = result.get('decision', 'REJECT')

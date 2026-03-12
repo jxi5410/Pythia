@@ -19,7 +19,7 @@ except ImportError:
     yf = None
 
 from .equities import get_related_tickers, CATEGORY_TICKERS
-from .causal_v2 import classify_market
+from .market_classifier import classify_market
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"

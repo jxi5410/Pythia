@@ -12,3 +12,4 @@ scipy>=1.11.0
 tigramite>=5.2.0
 dowhy>=0.11
 econml>=0.15.0
+python-dotenv>=1.0.0
