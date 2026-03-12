@@ -221,16 +221,17 @@ def _fetch_macro_evidence(spike_context: Dict) -> List[EvidenceItem]:
 
 
 def _fetch_social_evidence(spike_context: Dict) -> List[EvidenceItem]:
-    """Fetch social media signals (Twitter/X)."""
+    """Fetch social media signals from Twitter/X and Reddit."""
     items = []
     spike_ts = spike_context.get("spike", {}).get("timestamp", "")
+    title = spike_context.get("market_title", "")
+    category = spike_context.get("category", "general")
 
+    # --- Twitter/X (best-effort — scraping is fragile) ---
     try:
         from .twitter_signals import search_recent_tweets, extract_search_terms
 
-        title = spike_context.get("market_title", "")
         terms = extract_search_terms(title)
-
         for term in terms[:3]:
             tweets = search_recent_tweets(term, hours_back=4)
             for t in tweets[:3]:
@@ -247,7 +248,47 @@ def _fetch_social_evidence(spike_context: Dict) -> List[EvidenceItem]:
     except ImportError:
         logger.debug("twitter_signals module not available")
     except Exception as e:
-        logger.warning("Social evidence fetch failed: %s", e)
+        logger.warning("Twitter evidence fetch failed (non-fatal): %s", e)
+
+    # --- Reddit (reliable — public JSON API, no key needed) ---
+    try:
+        from .evidence.news_retrieval import reddit_search
+
+        # Map category to relevant subreddits
+        subreddit_map = {
+            "crypto": ["cryptocurrency", "bitcoin", "ethtrader"],
+            "fed_rate": ["economics", "finance", "wallstreetbets"],
+            "tariffs": ["economics", "geopolitics", "news"],
+            "geopolitical": ["geopolitics", "worldnews", "news"],
+            "election": ["politics", "news", "PoliticalDiscussion"],
+            "tech": ["technology", "news"],
+        }
+        subreddits = subreddit_map.get(category, ["news", "worldnews"])
+
+        # Build search terms from title
+        search_terms = [w for w in title.split() if len(w) > 3][:4]
+        query = " ".join(search_terms)
+
+        for sub in subreddits[:2]:
+            try:
+                posts = reddit_search(query, subreddit=sub, max_results=5)
+                for p in posts[:3]:
+                    items.append(EvidenceItem(
+                        source="reddit",
+                        data_type="reddit_post",
+                        summary=f"r/{sub}: {p.get('headline', p.get('title', ''))[:120]}",
+                        raw_data=p,
+                        timestamp=p.get("published", ""),
+                        timing_vs_spike=_compute_timing(p.get("published", ""), spike_ts),
+                    ))
+            except Exception as e:
+                logger.debug("Reddit r/%s search failed: %s", sub, e)
+            time.sleep(0.3)
+
+    except ImportError:
+        logger.debug("reddit_search not available")
+    except Exception as e:
+        logger.warning("Reddit evidence fetch failed (non-fatal): %s", e)
 
     return items
 
@@ -312,7 +353,11 @@ def _fetch_equities_evidence(spike_context: Dict) -> List[EvidenceItem]:
 
 
 def _fetch_orderbook_evidence(spike_context: Dict) -> List[EvidenceItem]:
-    """Fetch orderbook / liquidity signals."""
+    """Fetch orderbook / liquidity signals.
+
+    NOTE: OrderbookAnalyzer requires live feed data to be populated first.
+    If the analyzer has no data (cold start), this returns empty gracefully.
+    """
     items = []
     try:
         from .orderbook_analyzer import OrderbookAnalyzer
@@ -320,20 +365,35 @@ def _fetch_orderbook_evidence(spike_context: Dict) -> List[EvidenceItem]:
         market_id = spike_context.get("spike", {}).get("market_id", "")
         if market_id:
             analyzer = OrderbookAnalyzer()
-            snapshot = analyzer.get_snapshot(market_id)
-            if snapshot:
+            # get_recent_signals returns signals already detected from live feed
+            signals = analyzer.get_recent_signals(market_id=market_id, limit=5)
+            for sig in (signals or []):
                 items.append(EvidenceItem(
                     source="orderbook",
-                    data_type="liquidity_snapshot",
-                    summary=f"Bid depth: {snapshot.bid_depth:.0f}, "
-                            f"Ask depth: {snapshot.ask_depth:.0f}, "
-                            f"Spread: {snapshot.spread:.4f}",
-                    raw_data=snapshot.__dict__ if hasattr(snapshot, '__dict__') else {},
+                    data_type=sig.get("signal_type", "liquidity_signal"),
+                    summary=f"{sig.get('signal_type', '?')}: {sig.get('description', sig.get('details', '?'))}",
+                    raw_data=sig,
+                    timestamp=sig.get("timestamp", ""),
+                    timing_vs_spike=_compute_timing(
+                        sig.get("timestamp", ""),
+                        spike_context.get("spike", {}).get("timestamp", ""),
+                    ),
+                ))
+
+            # Also check imbalance signal
+            imbalance = analyzer.get_imbalance_signal(market_id)
+            if imbalance:
+                items.append(EvidenceItem(
+                    source="orderbook",
+                    data_type="order_imbalance",
+                    summary=f"Imbalance: {imbalance.get('imbalance', '?'):.2%} "
+                            f"({imbalance.get('direction', '?')})",
+                    raw_data=imbalance,
                     timing_vs_spike="concurrent",
                 ))
 
     except (ImportError, AttributeError):
-        logger.debug("orderbook_analyzer module not available or not applicable")
+        logger.debug("orderbook_analyzer not available or no data")
     except Exception as e:
         logger.warning("Orderbook evidence fetch failed: %s", e)
 
