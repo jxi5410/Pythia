@@ -9,6 +9,7 @@ interface MarketResult {
   id: string; question: string; slug: string; conditionId: string;
   clobTokenIds: string[]; outcomes: string[]; outcomePrices: string[];
   volume24hr: number; volume: number; image: string;
+  spikeCount?: number; // -1 = failed to fetch, 0+ = actual count
 }
 
 interface Spike {
@@ -819,18 +820,40 @@ export default function Pythia() {
               textTransform: "uppercase" as const, letterSpacing: 1, color: C.muted, marginBottom: 12 }}>
               {searchResults.length} markets found — select one
             </div>
-            {searchResults.map((m, i) => (
-              <div key={i} onClick={() => loadChart(m)} style={{ background: C.surface, border: `1px solid ${C.border}`,
-                borderRadius: 6, padding: "14px 18px", marginBottom: 8, cursor: "pointer", transition: "border-color 0.2s" }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.accent)}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}>
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{m.question}</div>
-                <div style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
-                  Yes: {(parseFloat(m.outcomePrices?.[0] || "0") * 100).toFixed(1)}¢
-                  {" · "}Vol 24h: ${(m.volume24hr / 1000).toFixed(0)}K
+            {searchResults.map((m, i) => {
+              const sc = m.spikeCount;
+              const hasSpikes = sc !== undefined && sc > 0;
+              const noSpikes = sc === 0;
+              return (
+                <div key={i} onClick={() => loadChart(m)} style={{ background: C.surface,
+                  border: `1px solid ${noSpikes ? C.border : C.border}`,
+                  borderRadius: 6, padding: "14px 18px", marginBottom: 8, cursor: "pointer",
+                  transition: "border-color 0.2s", opacity: noSpikes ? 0.55 : 1 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.accent)}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>{m.question}</span>
+                    {hasSpikes && (
+                      <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 700,
+                        padding: "2px 8px", borderRadius: 10, background: C.accent, color: "#fff", flexShrink: 0 }}>
+                        {sc} spike{sc !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {noSpikes && (
+                      <span style={{ fontFamily: mono, fontSize: 10,
+                        padding: "2px 8px", borderRadius: 10, background: C.faint, color: C.muted, flexShrink: 0 }}>
+                        no spikes
+                      </span>
+                    )}
+                    {sc === undefined || sc === -1 ? null : null}
+                  </div>
+                  <div style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
+                    Yes: {(parseFloat(m.outcomePrices?.[0] || "0") * 100).toFixed(1)}¢
+                    {" · "}Vol 24h: ${(m.volume24hr / 1000).toFixed(0)}K
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
