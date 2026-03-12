@@ -377,7 +377,20 @@ async def attribute_spike_streaming(
             "hypotheses": [{"cause": h.cause_description[:100], "confidence": round(h.confidence, 2)} for h in hyps],
         }}
 
-    # Step 6: Debate rounds (depth 3 only — skip for depth 2)
+    # Step 6: Agent interaction round (agents respond to each other's hypotheses)
+    interaction_data = None
+    try:
+        from .bace_interaction import run_interaction_round, interaction_round_to_sse
+        interaction_data = await run_interaction_round(
+            agents, hypotheses, context, llm_fast, round_number=1,
+            _run_in_thread=_run_in_thread,
+        )
+        yield {"step": "interaction", "data": interaction_round_to_sse(interaction_data)}
+    except Exception as e:
+        logger.warning("Interaction round failed (non-fatal): %s", e)
+        yield {"step": "interaction", "data": {"round": 1, "responses": 0, "error": str(e)}}
+
+    # Step 6b: Debate rounds (depth 3 only — skip for depth 2)
     debate_rounds = 0 if depth <= 2 else 2
     if debate_rounds > 0:
         from .bace_debate import run_critique_round
@@ -392,7 +405,35 @@ async def attribute_spike_streaming(
         "tested": len([h for h in hypotheses if h.status != "debunked"]),
     }}
 
-    # Step 8: Build final result
+    # Step 8: Scenario clustering
+    scenarios = []
+    try:
+        from .bace_scenarios import cluster_hypotheses_into_scenarios, scenarios_to_sse
+        scenarios = cluster_hypotheses_into_scenarios(
+            hypotheses, interaction_round=interaction_data, agents=agents,
+        )
+        yield {"step": "scenarios", "data": scenarios_to_sse(scenarios)}
+    except Exception as e:
+        logger.warning("Scenario clustering failed (non-fatal): %s", e)
+
+    # Step 9: Persist to graph memory
+    graph_stats = None
+    try:
+        from .bace_graph_memory import BACEGraphMemory
+        import os
+        db_path = os.environ.get("PYTHIA_DB_PATH", "pythia.db")
+        graph_mem = BACEGraphMemory(db_path)
+        graph_mem.ingest_from_ontology(ontology)
+        graph_stats = graph_mem.get_stats()
+        yield {"step": "graph_update", "data": {
+            "entities": graph_stats["entities"],
+            "relationships": graph_stats["relationships"],
+            "facts": graph_stats["active_facts"],
+        }}
+    except Exception as e:
+        logger.warning("Graph memory update failed (non-fatal): %s", e)
+
+    # Step 10: Build final result
     survived = [h for h in hypotheses if h.status == "survived" and h.confidence >= 0.25]
     debunked = [h for h in hypotheses if h.status == "debunked"]
     best = survived[0] if survived else None
@@ -418,6 +459,8 @@ async def attribute_spike_streaming(
                 "confidence_score": round(h.confidence, 3),
                 "impact_speed": h.impact_speed,
                 "time_to_peak": h.time_to_peak_impact,
+                "temporal_plausibility": h.temporal_plausibility,
+                "magnitude_plausibility": h.magnitude_plausibility,
                 "evidence": h.evidence,
                 "evidence_urls": h.evidence_urls,
                 "counterfactual": "",
@@ -429,6 +472,13 @@ async def attribute_spike_streaming(
             }
             for h in sorted(hypotheses, key=lambda x: x.confidence, reverse=True)
         ],
+        "scenarios": [s.to_dict() for s in scenarios],
+        "interaction": {
+            "rounds": 1,
+            "responses": len(interaction_data.responses) if interaction_data else 0,
+            "convergence_groups": len(interaction_data.convergence_groups) if interaction_data else 0,
+            "divergence_pairs": len(interaction_data.divergence_pairs) if interaction_data else 0,
+        },
         "attribution": {
             "most_likely_cause": best.cause_description if best else "No cause survived",
             "confidence": "HIGH" if best and best.confidence >= 0.7 else "MEDIUM" if best and best.confidence >= 0.4 else "LOW",
@@ -438,11 +488,25 @@ async def attribute_spike_streaming(
             "agents_spawned": len(agents),
             "hypotheses_proposed": len(hypotheses),
             "debate_rounds": debate_rounds,
+            "interaction_rounds": 1,
+            "scenario_count": len(scenarios),
             "elapsed_seconds": round(elapsed, 1),
+            "depth": depth,
         },
+        "graph_stats": graph_stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    logger.info("BACE PARALLEL COMPLETE: %d survived, %d debunked (%.1fs)", len(survived), len(debunked), elapsed)
+    # Persist full attribution to graph memory
+    try:
+        if graph_mem:
+            import uuid
+            run_id = str(uuid.uuid4())[:12]
+            graph_mem.ingest_from_result(run_id, result)
+    except Exception as e:
+        logger.warning("Graph memory result persistence failed: %s", e)
+
+    logger.info("BACE PARALLEL COMPLETE: %d survived, %d debunked, %d scenarios (%.1fs)",
+                len(survived), len(debunked), len(scenarios), elapsed)
 
     yield {"step": "result", "data": result}
