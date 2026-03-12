@@ -373,7 +373,7 @@ function BACELive({ baceState }: { baceState: BACEState }) {
 }
 
 // ─── Result Panel ────────────────────────────────────────────────────
-function ResultPanel({ attr }: { attr: Attribution }) {
+function ResultPanel({ attr, isLive }: { attr: Attribution; isLive: boolean }) {
   const [expanded, setExpanded] = useState<number | null>(0); // first one open by default
 
   return (
@@ -383,8 +383,8 @@ function ResultPanel({ attr }: { attr: Attribution }) {
         <span style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
           Depth {attr.depth} · {attr.agentsSpawned} agents · {attr.hypothesesProposed} hypotheses · {attr.elapsed.toFixed(1)}s
         </span>
-        <span style={{ fontFamily: mono, fontSize: 10, color: C.accent }}>
-          ⚠ simulated — backend not connected
+        <span style={{ fontFamily: mono, fontSize: 10, color: isLive ? C.yes : C.accent }}>
+          {isLive ? "● live attribution" : "⚠ simulated — backend not connected"}
         </span>
       </div>
 
@@ -488,9 +488,11 @@ function ResultPanel({ attr }: { attr: Attribution }) {
                         )}
                       </div>
                     ))}
-                    <div style={{ fontFamily: mono, fontSize: 10, color: C.muted, marginTop: 4, fontStyle: "italic" as const }}>
-                      Source links will be available when backend is connected
-                    </div>
+                    {!isLive && (
+                      <div style={{ fontFamily: mono, fontSize: 10, color: C.muted, marginTop: 4, fontStyle: "italic" as const }}>
+                        Source links will be available when backend is connected
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -525,6 +527,7 @@ export default function Pythia() {
   const [selectedSpike, setSelectedSpike] = useState<Spike | null>(null);
   const [baceState, setBaceState] = useState<BACEState>({ step: 0, entities: [], agentsActive: [], debateLog: [], counterfactualsTested: 0 });
   const [attribution, setAttribution] = useState<Attribution | null>(null);
+  const [isLive, setIsLive] = useState(false);
   const [error, setError] = useState("");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -590,24 +593,99 @@ export default function Pythia() {
     }
   }, []);
 
-  const runBACE = useCallback((spike: Spike) => {
+  const runBACE = useCallback(async (spike: Spike) => {
     setSelectedSpike(spike);
     setPhase("running-bace");
     setAttribution(null);
-    const states = generateBACEStates(spike, selectedMarket?.question || "");
+    setIsLive(false);
+
+    const question = selectedMarket?.question || "";
+    const states = generateBACEStates(spike, question);
     setBaceState(states[0]);
 
+    // Start animation loop (runs regardless of backend)
     let step = 0;
     timerRef.current = setInterval(() => {
       step++;
-      if (step >= states.length) {
-        clearInterval(timerRef.current!);
-        setAttribution(generateMockAttribution(spike, selectedMarket?.question || ""));
-        setPhase("result");
-      } else {
+      // Loop the last few steps if backend is still running
+      if (step < states.length) {
         setBaceState(states[step]);
+      } else if (step < states.length + 20) {
+        // Keep the last state visible while waiting for backend
+        setBaceState(states[states.length - 1]);
       }
     }, 900 + Math.random() * 600);
+
+    // Try real backend in parallel
+    try {
+      const res = await fetch("/api/attribute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          spike: {
+            market_title: question,
+            market_id: selectedMarket?.id || "",
+            timestamp: spike.timestamp,
+            direction: spike.direction,
+            magnitude: spike.magnitude,
+            price_before: spike.priceBefore,
+            price_after: spike.priceAfter,
+            volume_at_spike: 0,
+          },
+          depth: 2,
+        }),
+      });
+
+      if (timerRef.current) clearInterval(timerRef.current);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.hypotheses?.length > 0) {
+          // Map backend response to frontend Hypothesis type
+          const hyps: Hypothesis[] = data.hypotheses.map((h: any) => ({
+            agent: h.agent || "Unknown",
+            agentRole: "",
+            cause: h.cause || "",
+            reasoning: h.reasoning || "",
+            confidence: typeof h.confidence === "number" ? h.confidence : 0.5,
+            confidenceFactors: "",
+            impactSpeed: h.impact_speed || "",
+            impactSpeedExplain: "",
+            timeToPeak: "",
+            timeToPeakExplain: "",
+            evidence: (h.evidence || []).map((e: any) => ({
+              source: e.source || "",
+              title: e.title || "",
+              url: e.url || null,
+              timestamp: e.timestamp || null,
+              timing: e.timing || "concurrent",
+            })),
+            counterfactual: h.counterfactual || "",
+          }));
+
+          setAttribution({
+            depth: data.depth || 2,
+            agentsSpawned: data.agents_spawned || hyps.length,
+            hypothesesProposed: data.hypotheses_proposed || hyps.length,
+            debateRounds: data.debate_rounds || 0,
+            elapsed: data.elapsed_seconds || 0,
+            hypotheses: hyps,
+          });
+          setIsLive(true);
+          setPhase("result");
+          return;
+        }
+      }
+      // Backend returned error or no data — fall through to mock
+    } catch {
+      // Backend not running — expected during local dev without server
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+
+    // Fallback: use mock data
+    setAttribution(generateMockAttribution(spike, question));
+    setIsLive(false);
+    setPhase("result");
   }, [selectedMarket]);
 
   useEffect(() => { return () => { if (timerRef.current) clearInterval(timerRef.current); }; }, []);
@@ -726,7 +804,7 @@ export default function Pythia() {
               </div>
             )}
 
-            {phase === "result" && attribution && <ResultPanel attr={attribution} />}
+            {phase === "result" && attribution && <ResultPanel attr={attribution} isLive={isLive} />}
           </div>
         )}
 
