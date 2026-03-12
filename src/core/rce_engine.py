@@ -60,16 +60,16 @@ def gather_evidence(ontology: CausalOntology, spike_context: Dict) -> Dict[str, 
     richer search queries from the ontology.
     """
     try:
-        from .causal_v2 import (
-            retrieve_candidate_news,
+        from .evidence.news_retrieval import (
             newsapi_search,
             google_news_rss,
             duckduckgo_search,
             reddit_search,
             filter_by_temporal_window,
         )
+        from .causal_v2 import retrieve_candidate_news
     except ImportError:
-        logger.warning("causal_v2 news retrieval not available")
+        logger.warning("news retrieval not available")
         return {"all": []}
 
     window = spike_context.get("temporal_window", {})

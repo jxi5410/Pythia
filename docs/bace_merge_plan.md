@@ -13,6 +13,24 @@ Total: ~3,940 lines across 12 files doing one job.
 Target: one engine (`bace.py`) with a depth parameter, ~1,800-2,200 lines
 across 6-7 files. The orchestrator and adapter layers are eliminated.
 
+## Status (updated 2026-03-12)
+
+**PR #19 (Codex slice 2-7 plan) has been superseded by this BACE plan.**
+Close PR #19 without merging. The useful code from that PR has been
+cherry-picked onto main:
+
+- `src/core/evidence/news_retrieval.py` — extracted news retrieval (222 lines) ✅
+- `src/core/evidence/__init__.py` — package init ✅
+- `src/core/evaluation/attribution_compare.py` — shadow persistence tables (102 lines) ✅
+- `src/core/evaluation/__init__.py` — package init ✅
+- `tests/test_news_retrieval.py` — news retrieval tests ✅
+- `tests/test_attribution_compare_persistence.py` — persistence tests ✅
+- `src/core/rce_engine.py` — updated imports to use evidence.news_retrieval ✅
+
+This means BACE Slice 1 (extract news_retrieval) is **partially complete**.
+Remaining Slice 1 work: extract `market_classifier.py`, `spike_context.py`,
+`feedback.py` from `causal_v2.py`, and add re-export stubs.
+
 ---
 
 ## Target Architecture
