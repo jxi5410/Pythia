@@ -159,12 +159,20 @@ def attribute_spike_endpoint(req: AttributeRequest):
 
     t0 = time.time()
 
-    # Build spike proxy
+    # Build spike proxy — strip timezone to naive UTC (BACE uses naive datetimes internally)
+    ts_raw = req.spike.timestamp
+    ts_raw = ts_raw.replace("Z", "+00:00")  # ensure fromisoformat handles it
+    try:
+        ts_dt = datetime.fromisoformat(ts_raw).replace(tzinfo=None)
+        ts_clean = ts_dt.isoformat()
+    except Exception:
+        ts_clean = ts_raw  # pass through if parsing fails
+
     spike = SpikeProxy(
         id=0,
         market_id=req.spike.market_id or req.spike.market_title,
         market_title=req.spike.market_title,
-        timestamp=req.spike.timestamp,
+        timestamp=ts_clean,
         direction=req.spike.direction,
         magnitude=req.spike.magnitude,
         price_before=req.spike.price_before,
