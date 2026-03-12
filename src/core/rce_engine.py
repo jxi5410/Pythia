@@ -26,8 +26,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Callable, Tuple
 
-from .rce_ontology import extract_causal_ontology, CausalOntology
-from .rce_agents import (
+from .bace_ontology import extract_causal_ontology, CausalOntology
+from .bace_agents import (
     AgentPersona, CausalHypothesis, spawn_agents,
     build_proposal_prompt, build_critique_prompt,
     build_counterfactual_prompt,
@@ -175,7 +175,7 @@ def run_proposal_round(
 
         # Build evidence text: domain-specific if available, else shared-only
         if agent_evidence and agent.id in agent_evidence:
-            from .rce_evidence_provider import format_domain_evidence_for_prompt
+            from .bace_evidence_provider import format_domain_evidence_for_prompt
             ae = agent_evidence[agent.id]
             domain_text = format_domain_evidence_for_prompt(ae)
             full_evidence_text = f"{shared_evidence_text}\n\n{domain_text}"
@@ -406,7 +406,7 @@ def attribute_spike_rce(
 
     # Step 1: Build spike context (reuse existing)
     try:
-        from .causal_v2 import build_spike_context
+        from .spike_context import build_spike_context
         context = build_spike_context(spike, all_recent_spikes or [], entity_llm=ontology_llm)
     except ImportError:
         context = {
@@ -450,7 +450,7 @@ def attribute_spike_rce(
     # Step 4.5: Gather domain-specific evidence per agent
     agent_evidence = None
     try:
-        from .rce_evidence_provider import gather_all_agent_evidence
+        from .bace_evidence_provider import gather_all_agent_evidence
         logger.info("Step 4.5: Gathering domain-specific evidence per agent...")
         agent_evidence = gather_all_agent_evidence(
             agents=agents,
@@ -460,7 +460,7 @@ def attribute_spike_rce(
         n_domain = sum(len(ae.domain_data) for ae in agent_evidence.values())
         logger.info("  Domain evidence: %d items across %d agents", n_domain, len(agent_evidence))
     except ImportError:
-        logger.debug("rce_evidence_provider not available — agents get shared news only")
+        logger.debug("bace_evidence_provider not available — agents get shared news only")
     except Exception as e:
         logger.warning("Domain evidence gathering failed (non-fatal): %s", e)
 

@@ -194,7 +194,7 @@ class Pipeline:
             correlation = None
             if not self.dry_run:
                 try:
-                    from .causal_v2 import classify_market
+                    from .market_classifier import classify_market
                     category = classify_market(spike.market_title)
                     correlation = correlate_spike(
                         market_title=spike.market_title,
