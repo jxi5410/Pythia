@@ -589,9 +589,14 @@ export default function Pythia() {
       }
 
       setPrices(data.history);
-      const priceRange = Math.max(...data.history.map((p: PricePoint) => p.price)) -
-                         Math.min(...data.history.map((p: PricePoint) => p.price));
-      const threshold = Math.max(0.02, priceRange * 0.15);
+      const allPrices = data.history.map((p: PricePoint) => p.price);
+      const priceRange = Math.max(...allPrices) - Math.min(...allPrices);
+      const medianPrice = allPrices.sort((a: number, b: number) => a - b)[Math.floor(allPrices.length / 2)] || 0.5;
+      // Use the LOWER of: 15% of price range, or 10% of median price
+      // This ensures low-price markets (e.g., 10¢) detect 2¢ moves as spikes
+      const absThreshold = priceRange * 0.15;
+      const relThreshold = medianPrice * 0.10; // 10% relative to current price
+      const threshold = Math.max(0.005, Math.min(absThreshold, relThreshold));
       setSpikes(detectSpikes(data.history, threshold));
       setPhase("chart");
     } catch (err: any) {

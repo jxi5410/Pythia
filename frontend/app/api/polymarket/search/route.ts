@@ -140,7 +140,12 @@ async function countSpikes(tokenId: string): Promise<number> {
     const pMin = Math.min(...prices);
     const pMax = Math.max(...prices);
     const range = pMax - pMin;
-    const threshold = Math.max(0.02, range * 0.15);
+    const sorted = [...prices].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] || 0.5;
+    // Lower of: 15% of range or 10% of median price (catches low-price markets)
+    const absThresh = range * 0.15;
+    const relThresh = median * 0.10;
+    const threshold = Math.max(0.005, Math.min(absThresh, relThresh));
     const win = Math.min(4, Math.floor(prices.length / 10));
 
     let spikeCount = 0;
