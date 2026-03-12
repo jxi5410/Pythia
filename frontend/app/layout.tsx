@@ -39,8 +39,11 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="Pythia" />
       </head>
       <body>
-        {children}
+        <StoreWrapper>{children}</StoreWrapper>
       </body>
     </html>
   );
 }
+
+// Client component wrapper for providers
+import StoreWrapper from '@/components/StoreWrapper';

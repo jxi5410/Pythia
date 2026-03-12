@@ -19,6 +19,8 @@ interface InterrogationChatProps {
   initialQuestion?: string;
   /** Clear the initial question after it's been sent */
   onInitialQuestionConsumed?: () => void;
+  /** When true, chat is always expanded (no toggle button) */
+  alwaysOpen?: boolean;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────
@@ -39,11 +41,12 @@ export default function InterrogationChat({
   marketTitle,
   initialQuestion,
   onInitialQuestionConsumed,
+  alwaysOpen = false,
 }: InterrogationChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(alwaysOpen);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialSent = useRef(false);
