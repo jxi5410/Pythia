@@ -621,9 +621,10 @@ export default function Pythia() {
       }
     }, 900 + Math.random() * 600);
 
-    // Try real backend in parallel
+    // Try real backend directly (bypasses Next.js proxy timeout in dev mode)
+    const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || "http://localhost:8000";
     try {
-      const res = await fetch("/api/attribute", {
+      const res = await fetch(`${backendUrl}/api/attribute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
