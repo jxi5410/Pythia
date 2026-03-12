@@ -256,16 +256,16 @@ def attribute_spike_v2_wrapper(spike: SpikeEvent, db: PythiaDB,
     Falls back to v1 if LLM is unavailable.
     """
     try:
-        from .causal_v2 import attribute_spike_v2
+        from .bace import attribute_spike, BACEDepth
         from .llm_integration import sonnet_call, opus_call
 
-        result = attribute_spike_v2(
+        result = attribute_spike(
             spike,
             all_recent_spikes=all_recent_spikes or [],
-            entity_llm=sonnet_call,
-            filter_llm=sonnet_call,
-            reasoning_llm=opus_call,
             db=db,
+            depth=BACEDepth.FAST,
+            llm_fast=sonnet_call,
+            llm_strong=opus_call,
         )
 
         # Update spike with v2 attribution data

@@ -17,7 +17,7 @@ import pandas as pd
 from .connectors.polymarket import PolymarketConnector
 from .database import PythiaDB
 from .detector import SignalDetector, Signal
-from .causal_v2 import attribute_spike_v2
+from .bace import attribute_spike
 from .config import Config
 from .equities import correlate_spike, format_correlation_alert
 from .confluence import (
@@ -151,16 +151,16 @@ class Pipeline:
             })
             spike.id = spike_id
 
-            # Run causal attribution (v2)
+            # Run causal attribution via orchestrator (fast/deep/shadow)
             if not self.dry_run:
                 logger.info("Running causal attribution for: %s", spike.market_title[:60])
-                result = attribute_spike_v2(
+                result = attribute_spike(
                     spike=spike,
                     all_recent_spikes=self._recent_spike_proxies,
-                    entity_llm=llm_call,
-                    filter_llm=llm_call,
-                    reasoning_llm=llm_call,
                     db=self.db,
+                    depth=getattr(self.config, "BACE_DEPTH", 2),
+                    llm_fast=llm_call,
+                    llm_strong=llm_call,
                 )
             else:
                 result = {
@@ -181,7 +181,7 @@ class Pipeline:
             correlation = None
             if not self.dry_run:
                 try:
-                    from .causal_v2 import classify_market
+                    from .market_classifier import classify_market
                     category = classify_market(spike.market_title)
                     correlation = correlate_spike(
                         market_title=spike.market_title,

@@ -363,7 +363,7 @@ def submit_feedback(
     Submit feedback on attributions or signals.
     Used by PCE self-learning loop.
     """
-    from .causal_v2 import log_feedback
+    from .feedback import log_feedback
 
     if spike_id:
         log_feedback(spike_id, feedback_type, details)
