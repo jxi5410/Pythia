@@ -77,6 +77,7 @@ class CausalOntology:
     entities: List[Entity] = field(default_factory=list)
     relationships: List[Relationship] = field(default_factory=list)
     search_queries: List[str] = field(default_factory=list)  # derived search terms
+    llm_category: str = ""  # LLM-classified category (overrides keyword-based)
 
     def to_dict(self) -> Dict:
         return {
@@ -121,6 +122,7 @@ Think broadly. Include:
 
 Return ONLY valid JSON with this exact structure:
 {{
+  "category": "One of: fed_rate, inflation, election, crypto, trade_war, geopolitical, tech, recession, energy, climate, health, sports, entertainment, general",
   "entities": [
     {{
       "id": "unique-id",
@@ -202,10 +204,12 @@ def extract_causal_ontology(
                     for r in parsed.get("relationships", [])
                 ]
                 ontology.search_queries = parsed.get("search_queries", [])
+                ontology.llm_category = parsed.get("category", "")
 
                 logger.info(
-                    "Ontology extracted: %d entities, %d relationships, %d queries",
+                    "Ontology extracted: %d entities, %d relationships, %d queries (category=%s)",
                     len(ontology.entities), len(ontology.relationships), len(ontology.search_queries),
+                    ontology.llm_category or "not classified",
                 )
                 return ontology
         except Exception as e:

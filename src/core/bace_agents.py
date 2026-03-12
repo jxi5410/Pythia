@@ -393,7 +393,7 @@ For each hypothesis, provide:
 1. cause_description: What specifically caused the spike (be precise)
 2. causal_chain: Step-by-step how this cause led to the price move
 3. evidence: List of specific evidence supporting this hypothesis
-4. confidence: Your honest confidence level (0.0 to 1.0)
+4. confidence: Your calibrated confidence level (see CALIBRATION RULES below)
 5. temporal_plausibility: Did the cause precede the effect? By how long?
 6. magnitude_plausibility: Is this cause big enough to explain the observed move?
 7. impact_speed: How quickly does this type of cause typically affect markets?
@@ -402,6 +402,18 @@ For each hypothesis, provide:
    - "delayed" (days): regulatory proposals, supply chain shifts, sentiment trends
    - "slow" (weeks+): demographic shifts, technology adoption, structural changes
 8. time_to_peak_impact: Estimated hours/days until maximum market effect
+
+CONFIDENCE CALIBRATION RULES (MANDATORY — violations will be rejected):
+- HARD CEILING: 0.85 maximum. Any value above 0.85 will be clamped to 0.85.
+- 0.70-0.85: STRONG — You found direct, timestamped evidence that this specific event preceded the spike AND the causal mechanism is well-established. Example: FOMC statement released 30 min before spike, market moved in the expected direction.
+- 0.50-0.69: MODERATE — Plausible hypothesis with some supporting evidence, but gaps exist. Evidence may be circumstantial, timing is approximate, or alternative explanations are equally viable.
+- 0.30-0.49: WEAK — Hypothesis fits the narrative but evidence is thin, timing is uncertain, or the causal mechanism requires multiple assumptions.
+- 0.10-0.29: SPECULATIVE — Possible but no direct evidence. Based on general patterns, not specific to this spike.
+- 0.00-0.09: NULL — No evidence found in your domain. Report this honestly rather than fabricating a cause.
+
+IMPORTANT: Most hypotheses should be in the 0.30-0.65 range. A confidence above 0.70 requires SPECIFIC TIMESTAMPED EVIDENCE that the cause preceded the spike. If you cannot cite a specific time, your confidence should be below 0.65.
+
+If you found NO evidence of a cause in your domain, say so with confidence 0.05-0.15. An honest null finding is more valuable than a fabricated high-confidence hypothesis.
 
 CRITICAL TIMING RULES:
 - A cause that happened AFTER the spike CANNOT have caused it.

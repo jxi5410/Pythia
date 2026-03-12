@@ -345,8 +345,12 @@ async def attribute_spike_streaming(
 
     yield {"step": "evidence", "data": {"count": n_evidence}}
 
-    # Step 4: Spawn agents
+    # Step 4: Spawn agents — use LLM category if ontology provided one
     from .bace_agents import spawn_agents
+    if ontology.llm_category:
+        category = ontology.llm_category
+        context["category"] = category  # update context for downstream
+        logger.info("Using LLM-classified category: %s", category)
     agents = spawn_agents(category)
 
     yield {"step": "agents", "data": {

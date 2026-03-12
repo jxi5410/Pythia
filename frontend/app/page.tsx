@@ -817,13 +817,13 @@ export default function Pythia() {
         {/* Input */}
         <div style={{ marginBottom: 32 }}>
           <div style={{ fontSize: 14, color: C.muted, marginBottom: 12, fontFamily: mono }}>
-            Paste a Polymarket URL or search by keyword
+            Search any prediction market by keyword, or paste a Polymarket URL
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input type="text" value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
-              placeholder="https://polymarket.com/event/fed-decision-in-march  or  iran hormuz"
+              placeholder="iran hormuz, trump tariff, bitcoin ETF, or paste a Polymarket URL"
               style={{ flex: 1, padding: "12px 16px", border: `1px solid ${C.border}`, borderRadius: 6,
                 fontSize: 15, fontFamily: "'Source Serif 4', Georgia, serif", background: C.surface, color: C.dark, outline: "none" }} />
             <button onClick={handleAnalyze} disabled={!input.trim() || phase === "searching"}
@@ -957,7 +957,7 @@ export default function Pythia() {
               Why did this spike happen?
             </div>
             <div style={{ fontSize: 14, maxWidth: 440, margin: "0 auto", lineHeight: 1.6 }}>
-              Paste a Polymarket URL or search by keyword. Pythia fetches real price history,
+              Search any prediction market by keyword, or paste a Polymarket URL. Pythia fetches real price history,
               detects spikes, and attributes their causes using 9 specialized AI agents.
             </div>
           </div>
