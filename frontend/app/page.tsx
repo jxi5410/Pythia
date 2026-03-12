@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import BACEGraphAnimation from "@/components/BACEGraphAnimation";
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface PricePoint { t: string; price: number; }
@@ -10,6 +11,10 @@ interface MarketResult {
   clobTokenIds: string[]; outcomes: string[]; outcomePrices: string[];
   volume24hr: number; volume: number; image: string;
   spikeCount?: number; // -1 = failed to fetch, 0+ = actual count
+  exchange?: 'polymarket' | 'kalshi';
+  kalshiTicker?: string;
+  kalshiEventTicker?: string;
+  kalshiSeriesTicker?: string;
 }
 
 interface Spike {
@@ -559,7 +564,7 @@ export default function Pythia() {
     try {
       const slug = extractSlug(input);
       const params = slug ? `slug=${encodeURIComponent(slug)}` : `q=${encodeURIComponent(input.trim())}`;
-      const res = await fetch(`/api/polymarket/search?${params}`);
+      const res = await fetch(`/api/markets/search?${params}`);
       const data = await res.json();
 
       if (!data.markets?.length) {
@@ -584,10 +589,21 @@ export default function Pythia() {
     setPhase("loading-chart");
 
     try {
-      const tokenId = market.clobTokenIds?.[0];
-      if (!tokenId) { setError("No CLOB token ID for this market"); setPhase("idle"); return; }
+      let res: Response;
 
-      const res = await fetch(`/api/polymarket/history?tokenId=${encodeURIComponent(tokenId)}&interval=max&fidelity=60`);
+      if (market.exchange === 'kalshi') {
+        // Kalshi: use candlesticks via unified history endpoint
+        if (!market.kalshiTicker || !market.kalshiSeriesTicker) {
+          setError("Missing Kalshi ticker info"); setPhase("idle"); return;
+        }
+        res = await fetch(`/api/markets/history?exchange=kalshi&ticker=${encodeURIComponent(market.kalshiTicker)}&series_ticker=${encodeURIComponent(market.kalshiSeriesTicker)}&interval=max&fidelity=60`);
+      } else {
+        // Polymarket: use CLOB history
+        const tokenId = market.clobTokenIds?.[0];
+        if (!tokenId) { setError("No CLOB token ID for this market"); setPhase("idle"); return; }
+        res = await fetch(`/api/markets/history?exchange=polymarket&tokenId=${encodeURIComponent(tokenId)}&interval=max&fidelity=60`);
+      }
+
       const data = await res.json();
 
       if (!data.history?.length) {
@@ -663,14 +679,19 @@ export default function Pythia() {
           buffer = buffer.slice(idx + 2);
 
           let eventType = "";
-          let eventData = "";
+          let eventDataParts: string[] = [];
           for (const line of block.split("\n")) {
             if (line.startsWith("event: ")) {
               eventType = line.slice(7).trim();
             } else if (line.startsWith("data: ")) {
-              eventData = line.slice(6);
+              eventDataParts.push(line.slice(6));
+            } else if (line.startsWith("data:")) {
+              eventDataParts.push(line.slice(5));
             }
           }
+
+          // Per SSE spec: multiple data lines are joined with newlines
+          const eventData = eventDataParts.join("\n");
 
           if (!eventType || !eventData) continue;
 
@@ -716,7 +737,10 @@ export default function Pythia() {
                 liveLog.push(`Counterfactual testing: ${data.tested} hypotheses tested`);
               } else if (eventType === "result") {
                 finalResult = data;
-                console.log("[Pythia] Got result event, hypotheses:", data.hypotheses?.length || 0);
+                console.log("[Pythia] Got result event, hypotheses:", data.hypotheses?.length || 0, "agent_hypotheses:", data.agent_hypotheses?.length || 0);
+              } else if (eventType === "done") {
+                // Stream complete — break out of read loop
+                console.log("[Pythia] SSE done event received");
               } else if (eventType === "error") {
                 console.log("[Pythia] SSE error event:", data.error);
                 throw new Error(data.error || "Backend error");
@@ -740,22 +764,44 @@ export default function Pythia() {
         }
       }
 
+      // Flush remaining buffer (stream may end without trailing \n\n)
+      if (buffer.trim()) {
+        try {
+          let eventType = "";
+          let eventDataParts: string[] = [];
+          for (const line of buffer.split("\n")) {
+            if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+            else if (line.startsWith("data: ")) eventDataParts.push(line.slice(6));
+            else if (line.startsWith("data:")) eventDataParts.push(line.slice(5));
+          }
+          const eventData = eventDataParts.join("\n");
+          if (eventType === "result" && eventData) {
+            finalResult = JSON.parse(eventData);
+            console.log("[Pythia] Flushed result from buffer");
+          }
+        } catch { /* ignore malformed trailing data */ }
+      }
+
       // Process final result
       if (finalResult) {
-        const hyps: Hypothesis[] = (finalResult.hypotheses || []).map((h: any) => ({
-          agent: h.agent || "Unknown",
-          agentRole: "",
-          cause: h.cause || "",
-          reasoning: h.reasoning || "",
-          confidence: typeof h.confidence === "number" ? h.confidence : 0.5,
-          confidenceFactors: "",
-          impactSpeed: h.impact_speed || "",
-          impactSpeedExplain: "",
-          timeToPeak: "",
-          timeToPeakExplain: "",
+        // Server adds 'hypotheses' via _extract_hypotheses, but also try 'agent_hypotheses' as fallback
+        const rawHyps = finalResult.hypotheses || finalResult.agent_hypotheses || [];
+        console.log("[Pythia] Processing result, rawHyps:", rawHyps.length);
+
+        const hyps: Hypothesis[] = rawHyps.map((h: any) => ({
+          agent: h.agent || h.agent_name || "Unknown",
+          agentRole: h.agentRole || "",
+          cause: h.cause || h.hypothesis || "",
+          reasoning: h.reasoning || h.causal_chain || "",
+          confidence: typeof h.confidence === "number" ? h.confidence : (typeof h.confidence_score === "number" ? h.confidence_score : 0.5),
+          confidenceFactors: h.confidenceFactors || "",
+          impactSpeed: h.impact_speed || h.impactSpeed || "",
+          impactSpeedExplain: h.impactSpeedExplain || "",
+          timeToPeak: h.time_to_peak || h.timeToPeak || "",
+          timeToPeakExplain: h.timeToPeakExplain || "",
           evidence: (h.evidence || []).map((e: any) => ({
             source: e.source || "",
-            title: e.title || "",
+            title: e.title || e.headline || (typeof e === "string" ? e : ""),
             url: e.url || null,
             timestamp: e.timestamp || null,
             timing: e.timing || "concurrent",
@@ -817,13 +863,13 @@ export default function Pythia() {
         {/* Input */}
         <div style={{ marginBottom: 32 }}>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, fontFamily: mono }}>
-            Search Polymarket by keyword or paste a URL <span style={{ color: C.border, fontSize: 11 }}> · Kalshi coming soon</span>
+            Search Polymarket + Kalshi by keyword or paste a URL
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input type="text" value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAnalyze()}
-              placeholder="iran hormuz, trump tariff, bitcoin ETF, or paste a Polymarket URL"
+              placeholder="iran hormuz, trump tariff, bitcoin ETF, fed rate — searches Polymarket + Kalshi"
               style={{ flex: 1, padding: "12px 16px", border: `1px solid ${C.border}`, borderRadius: 6,
                 fontSize: 15, fontFamily: "'Source Serif 4', Georgia, serif", background: C.surface, color: C.dark, outline: "none" }} />
             <button onClick={handleAnalyze} disabled={!input.trim() || phase === "searching"}
@@ -840,7 +886,7 @@ export default function Pythia() {
             <div style={{ width: 24, height: 24, border: `2px solid ${C.border}`, borderTopColor: C.accent,
               borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-            Searching Polymarket…
+            Searching Polymarket + Kalshi…
           </div>
         )}
 
@@ -862,6 +908,15 @@ export default function Pythia() {
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.accent)}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <span style={{ fontFamily: mono, fontSize: 9, fontWeight: 700,
+                      padding: "1px 5px", borderRadius: 3,
+                      background: m.exchange === 'kalshi' ? '#eef3ff' : '#f0f5ee',
+                      color: m.exchange === 'kalshi' ? '#4a6fa5' : '#5a7a4a',
+                      border: `1px solid ${m.exchange === 'kalshi' ? '#c0d0e8' : '#c8dcc0'}`,
+                      flexShrink: 0, textTransform: "uppercase" as const, letterSpacing: 0.5,
+                    }}>
+                      {m.exchange === 'kalshi' ? 'K' : 'PM'}
+                    </span>
                     <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>{m.question}</span>
                     {hasSpikes && (
                       <span style={{ fontFamily: mono, fontSize: 10, fontWeight: 700,
@@ -891,7 +946,7 @@ export default function Pythia() {
           <div style={{ textAlign: "center" as const, padding: 60, color: C.muted }}>
             <div style={{ width: 24, height: 24, border: `2px solid ${C.border}`, borderTopColor: C.accent,
               borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
-            Fetching price history from Polymarket CLOB…
+            Fetching price history…
           </div>
         )}
 
@@ -911,7 +966,10 @@ export default function Pythia() {
               {currentPrice && <span style={{ color: C.dark, fontWeight: 600 }}>{currentPrice} Yes</span>}
               {" · "}{prices.length} data points · {spikes.length} spike{spikes.length !== 1 ? "s" : ""} detected
               {" · "}Vol 24h: ${(selectedMarket.volume24hr / 1000).toFixed(0)}K
-              <span style={{ color: C.yes, marginLeft: 8 }}>● live data</span>
+              {selectedMarket.exchange === 'kalshi'
+                ? <span style={{ color: '#4a6fa5', marginLeft: 8 }}>● Kalshi</span>
+                : <span style={{ color: C.yes, marginLeft: 8 }}>● Polymarket</span>
+              }
             </div>
 
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
@@ -942,7 +1000,7 @@ export default function Pythia() {
                   </span>
                   {" "}at {new Date(selectedSpike.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                 </div>
-                <BACELive baceState={baceState} />
+                <BACEGraphAnimation baceState={baceState} />
               </div>
             )}
 
@@ -957,7 +1015,7 @@ export default function Pythia() {
               Why did this spike happen?
             </div>
             <div style={{ fontSize: 14, maxWidth: 440, margin: "0 auto", lineHeight: 1.6 }}>
-              Search Polymarket by keyword or paste a URL. Pythia fetches real price history,
+              Search Polymarket or Kalshi by keyword or paste a URL. Pythia fetches real price history,
               detects spikes, and attributes their causes using 9 specialized AI agents.
             </div>
           </div>
