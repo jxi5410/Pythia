@@ -162,7 +162,9 @@ async def attribute_stream(
 
                 # For the final result, also extract hypotheses
                 if step == "result":
-                    data["hypotheses"] = _extract_hypotheses(data)
+                    hyps = _extract_hypotheses(data)
+                    # Convert Pydantic models to dicts for JSON serialization
+                    data["hypotheses"] = [h.model_dump() if hasattr(h, 'model_dump') else h.dict() if hasattr(h, 'dict') else h for h in hyps]
 
                 yield f"event: {step}\ndata: {json.dumps(data, default=str)}\n\n"
 
