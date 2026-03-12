@@ -24,8 +24,30 @@ CATEGORY_KEYWORDS = {
 }
 
 
-def classify_market(title: str) -> str:
-    """Classify a market into a category based on title keywords."""
+def classify_market(title: str, llm_call=None) -> str:
+    """Classify a market into a category. Uses LLM if available, else keywords."""
+    # Try LLM first for accurate classification
+    if llm_call:
+        try:
+            categories = list(CATEGORY_KEYWORDS.keys())
+            prompt = f"""Classify this prediction market into exactly ONE category.
+
+Market: "{title}"
+
+Categories: {', '.join(categories)}
+
+Reply with ONLY the category name, nothing else. If none fit well, reply "general"."""
+            response = llm_call(prompt).strip().lower().replace('"', '').replace("'", "")
+            # Find the best match
+            for cat in categories:
+                if cat in response:
+                    return cat
+            if "general" in response:
+                return "general"
+        except Exception as e:
+            logger.debug("LLM classification failed, using keywords: %s", e)
+
+    # Fallback: keyword matching
     title_lower = title.lower()
     scores = {}
     for cat, keywords in CATEGORY_KEYWORDS.items():

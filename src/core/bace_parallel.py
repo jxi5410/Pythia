@@ -197,7 +197,7 @@ async def run_proposals_parallel(agents, spike_context, ontology, evidence, llm_
                         causal_chain=h.get("causal_chain", ""),
                         evidence=h.get("evidence", []),
                         evidence_urls=h.get("evidence_urls", []),
-                        confidence=float(h.get("confidence", 0.5)),
+                        confidence=min(0.85, float(h.get("confidence", 0.5))),
                         temporal_plausibility=h.get("temporal_plausibility", ""),
                         magnitude_plausibility=h.get("magnitude_plausibility", ""),
                         impact_speed=h.get("impact_speed", ""),

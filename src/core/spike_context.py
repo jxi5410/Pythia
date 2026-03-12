@@ -50,7 +50,7 @@ def build_spike_context(spike, all_recent_spikes=None, entity_llm=None) -> Dict:
 
     return {
         "market_title": spike.market_title,
-        "category": classify_market(spike.market_title),
+        "category": classify_market(spike.market_title, llm_call=entity_llm),
         "entities": entities,
         "spike": {
             "direction": spike.direction,

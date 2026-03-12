@@ -816,8 +816,8 @@ export default function Pythia() {
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px" }}>
         {/* Input */}
         <div style={{ marginBottom: 32 }}>
-          <div style={{ fontSize: 14, color: C.muted, marginBottom: 12, fontFamily: mono }}>
-            Search any prediction market by keyword, or paste a Polymarket URL
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, fontFamily: mono }}>
+            Search Polymarket by keyword or paste a URL <span style={{ color: C.border, fontSize: 11 }}> · Kalshi coming soon</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input type="text" value={input}
@@ -957,7 +957,7 @@ export default function Pythia() {
               Why did this spike happen?
             </div>
             <div style={{ fontSize: 14, maxWidth: 440, margin: "0 auto", lineHeight: 1.6 }}>
-              Search any prediction market by keyword, or paste a Polymarket URL. Pythia fetches real price history,
+              Search Polymarket by keyword or paste a URL. Pythia fetches real price history,
               detects spikes, and attributes their causes using 9 specialized AI agents.
             </div>
           </div>
