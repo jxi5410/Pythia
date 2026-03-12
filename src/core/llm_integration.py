@@ -17,7 +17,7 @@ Environment variables:
   PYTHIA_LLM_TIMEOUT       — Request timeout in seconds (default: 120)
   PYTHIA_LLM_MAX_RETRIES   — Max retries on failure (default: 2)
 
-Cost comparison (per RCE pipeline run, ~80 LLM calls):
+Cost comparison (per BACE depth-3 run, ~95 LLM calls):
   Qwen-Plus (Alibaba):    ~$0.30-0.50 (recommended for development)
   DeepSeek-V3:            ~$0.20-0.40
   Ollama (local):         $0 (requires GPU, slower)

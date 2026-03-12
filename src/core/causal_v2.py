@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Pythia Causal Analysis v2 — 5-layer attribution pipeline with governance.
+BACE Fast Attribution — Single-shot causal attribution pipeline.
 
-Layer 1: Context Builder (free)
-Layer 2: News Retrieval (free APIs)
-Layer 3: Candidate Filter (Sonnet — fast relevance scoring)
-Layer 4: Causal Reasoning (Opus — deep analysis)
-Layer 5: Store & Learn (local DB)
+Used internally by bace.py at depth=1 (FAST mode).
+Not called directly — use bace.attribute_spike(depth=1) instead.
 
-Governance (Singapore IMDA + UC Berkeley):
-- Confidence scoring at each layer
-- Validation checkpoints between agents
-- Audit trail for all actions
-- Circuit breaker for cost control
-- Human approval gates for low-confidence signals
+Layers:
+  1. Context Builder (entity extraction)
+  1.5. Counterfactual Validation (CausalImpact / z-score)
+  2. News Retrieval (multi-source, temporal filtered)
+  3. Candidate Filter (LLM relevance scoring)
+  4. Causal Reasoning (LLM deep analysis)
+  4.5. DAG Refutation (DoWhy)
+  4.6. Heterogeneous Effects (EconML)
+  5. Store & Learn
 """
 
 import json

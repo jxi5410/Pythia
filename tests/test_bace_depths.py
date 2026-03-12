@@ -26,7 +26,7 @@ def test_bace_standard_uses_rce_with_zero_debate(monkeypatch):
         assert kwargs["debate_rounds"] == 0
         return {"spike_id": 1, "attribution": {"confidence": "MEDIUM"}, "debate_rounds": 0}
 
-    monkeypatch.setattr("core.rce_engine.attribute_spike_rce", _fake_rce)
+    monkeypatch.setattr("core.bace_debate.attribute_spike_rce", _fake_rce)
     out = attribute_spike(_Spike(), depth=BACEDepth.STANDARD)
     assert out["bace_depth"] == 2
     assert out["bace_metadata"]["debate_rounds"] == 0

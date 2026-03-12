@@ -52,7 +52,5 @@ class Config:
     # Signal cooldown (seconds)
     SIGNAL_COOLDOWN = 300  # 5 minutes
 
-    # Attribution engine mode: fast (PCE), deep (RCE), shadow (PCE + RCE eval)
-    ATTRIBUTION_MODE = os.getenv("PYTHIA_ATTRIBUTION_MODE", "fast").strip().lower()
-    # BACE depth: 1=fast, 2=standard, 3=deep
+    # BACE attribution depth: 1=fast (~3 LLM calls), 2=standard (~15), 3=deep (~95)
     BACE_DEPTH = int(os.getenv("PYTHIA_BACE_DEPTH", "2"))

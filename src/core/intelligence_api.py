@@ -361,7 +361,7 @@ def submit_feedback(
 ):
     """
     Submit feedback on attributions or signals.
-    Used by PCE self-learning loop.
+    Used by BACE self-learning loop.
     """
     from .feedback import log_feedback
 

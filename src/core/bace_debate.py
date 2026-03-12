@@ -1,17 +1,16 @@
 """
-Reverse Causal Engine (RCE) — Multi-agent adversarial attribution pipeline.
+BACE Debate Engine — Multi-agent adversarial attribution.
 
-Replaces the single-LLM PCE pipeline (causal_v2.attribute_spike_v2) with a
-multi-agent debate system inspired by MiroFish's simulation architecture,
-but reversed: agents investigate causes instead of predicting outcomes.
+Used by bace.py at depth 2 (proposals only, debate_rounds=0) and
+depth 3 (proposals + adversarial debate, debate_rounds=2).
 
 Pipeline:
   1. Extract rich entity-relationship ontology from spike context
   2. Gather news evidence using ontology-derived search queries
   3. Spawn domain-specific agents (Tier 1 + Tier 2 + Tier 3)
-  4. Round 1: Each agent proposes causal hypotheses
-  5. Rounds 2-N: Adversarial debate — agents critique each other
-  6. Counterfactual testing — remove each surviving hypothesis, re-evaluate
+  4. Each agent proposes causal hypotheses with domain-specific evidence
+  5. (Depth 3 only) Adversarial debate — agents critique each other
+  6. (Depth 3 only) Counterfactual testing — remove each hypothesis, re-evaluate
   7. Final scoring and attributor extraction
 
 Output is compatible with existing attributor_engine.py for storage and
@@ -75,7 +74,7 @@ def gather_evidence(ontology: CausalOntology, spike_context: Dict) -> Dict[str, 
     window = spike_context.get("temporal_window", {})
     all_candidates = []
 
-    # Use ontology search queries (much richer than PCE's 3-5 keywords)
+    # Use ontology search queries (much richer than depth-1's 3-5 keywords)
     queries = ontology.get_all_search_terms()
     logger.info("Searching with %d ontology-derived queries", len(queries))
 
@@ -161,7 +160,7 @@ def run_proposal_round(
 ) -> List[CausalHypothesis]:
     """Round 1: Each agent proposes causal hypotheses.
 
-    If agent_evidence is provided (from rce_evidence_provider), each agent
+    If agent_evidence is provided (from bace_evidence_provider), each agent
     gets domain-specific data + timing context in addition to shared news.
     """
     all_hypotheses = []
@@ -360,7 +359,7 @@ def run_counterfactual_round(
 
 
 # ----------------------------------------------------------------
-# Main RCE pipeline
+# Main debate pipeline
 # ----------------------------------------------------------------
 
 def attribute_spike_rce(
@@ -394,7 +393,7 @@ def attribute_spike_rce(
             from .llm_integration import sonnet_call
             llm_call = sonnet_call
         except ImportError:
-            logger.error("No LLM available for RCE")
+            logger.error("No LLM available for BACE debate")
             return _empty_result(spike)
 
     if ontology_llm is None:
@@ -427,7 +426,7 @@ def attribute_spike_rce(
 
     category = context.get("category", "general")
     logger.info("=" * 60)
-    logger.info("RCE PIPELINE START: %s", context.get("market_title", "?")[:60])
+    logger.info("BACE DEBATE START: %s", context.get("market_title", "?")[:60])
     logger.info("Category: %s | Magnitude: %.1f%%", category, float(context.get("spike", {}).get("magnitude", 0)) * 100)
 
     # Step 2: Extract rich ontology
@@ -485,7 +484,7 @@ def attribute_spike_rce(
 
     elapsed = time.time() - start_time
     logger.info("=" * 60)
-    logger.info("RCE COMPLETE: %d survived, %d debunked (%.1fs)",
+    logger.info("BACE DEBATE COMPLETE: %d survived, %d debunked (%.1fs)",
                 len(survived), len(debunked), elapsed)
     for h in survived:
         logger.info("  ✓ %s (conf=%.0f%%, agent=%s)", h.cause_description[:50], h.confidence * 100, h.agent_id)
@@ -518,9 +517,9 @@ def attribute_spike_rce(
                 "LOW"
             ),
             "confidence_reasoning": (
-                f"RCE: {len(survived)} hypotheses survived {debate_rounds} debate rounds + counterfactual testing. "
+                f"BACE: {len(survived)} hypotheses survived {debate_rounds} debate rounds + counterfactual testing. "
                 f"Top cause confidence: {best.confidence:.0%}." if best else
-                f"RCE: All {len(hypotheses)} hypotheses were debunked during adversarial debate."
+                f"BACE: All {len(hypotheses)} hypotheses were debunked during adversarial debate."
             ),
             "causal_chain": best.causal_chain if best else "",
             "macro_or_idiosyncratic": "MACRO" if len(survived) > 2 else "IDIOSYNCRATIC" if len(survived) == 1 else "MIXED",
@@ -544,13 +543,13 @@ def attribute_spike_rce(
 
 
 def _empty_result(spike) -> Dict:
-    """Return empty result when RCE can't run."""
+    """Return empty result when BACE debate can't run."""
     return {
         "spike_id": getattr(spike, "id", 0),
         "context": {},
         "method": "rce",
         "attribution": {
-            "most_likely_cause": "RCE pipeline could not execute — no LLM available",
+            "most_likely_cause": "BACE debate could not execute — no LLM available",
             "confidence": "LOW",
             "confidence_reasoning": "No LLM available",
             "causal_chain": "",

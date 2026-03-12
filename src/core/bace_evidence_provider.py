@@ -1,5 +1,5 @@
 """
-RCE Evidence Provider — Domain-specific data for each agent.
+BACE Evidence Provider — Domain-specific data for each agent.
 
 The critical gap in v1: all agents received identical news articles.
 The "On-chain Analyst" claimed to use Glassnode but actually just read Reuters.

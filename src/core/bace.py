@@ -1,8 +1,12 @@
 """BACE — Backward Attribution Causal Engine.
 
-Unified, depth-configurable attribution entrypoint.
-Depth 1 maps to the current PCE path; depth 2/3 map to the current RCE path
-with different debate intensity.
+Unified, depth-configurable attribution for prediction market spikes.
+
+Depth 1 (FAST):     Single-shot LLM reasoning, ~3 calls, ~$0.03/spike
+Depth 2 (STANDARD): Multi-agent proposals with domain evidence, ~15 calls, ~$0.15/spike
+Depth 3 (DEEP):     Full adversarial debate + counterfactual testing, ~95 calls, ~$0.47/spike
+
+Config: PYTHIA_BACE_DEPTH=1|2|3 (default: 2)
 """
 
 from enum import IntEnum
@@ -64,7 +68,7 @@ def attribute_spike(
         )
         return _with_bace_metadata(result, BACEDepth.FAST)
 
-    from .rce_engine import attribute_spike_rce
+    from .bace_debate import attribute_spike_rce
 
     debate_rounds = 0 if depth == int(BACEDepth.STANDARD) else 2
     result = attribute_spike_rce(

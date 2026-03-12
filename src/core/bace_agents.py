@@ -1,5 +1,5 @@
 """
-RCE Agents — Multi-agent adversarial causal debate system.
+BACE Agents — Multi-agent adversarial causal debate system.
 
 Inspired by MiroFish's persona generation + OASIS social simulation,
 but reversed: instead of agents reacting to an event to predict outcomes,

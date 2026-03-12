@@ -1,5 +1,5 @@
 """
-Attributor Engine — Persistent causal entities extracted from PCE attributions.
+Attributor Engine — Persistent causal entities extracted from BACE attributions.
 
 An Attributor is a named cause that persists across multiple spikes and markets.
 Examples: "Fed hawkish surprise", "China stimulus", "BTC ETF approval"
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------ #
-# Attributor extraction from PCE output
+# Attributor extraction from BACE output
 # ------------------------------------------------------------------ #
 
 def _normalize_cause(cause_text: str) -> str:
@@ -51,7 +51,7 @@ def _word_overlap(a: str, b: str) -> float:
 
 def extract_attributor(pce_result: Dict) -> Optional[Dict]:
     """
-    Extract an attributor entity from a PCE attribution result.
+    Extract an attributor entity from a BACE attribution result.
 
     Args:
         pce_result: Output from attribute_spike_v2() or attribute_spike_with_governance()

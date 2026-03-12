@@ -1,5 +1,5 @@
 """
-RCE Ontology Extractor — Rich entity-relationship graph from spike context.
+BACE Ontology Extractor — Rich entity-relationship graph from spike context.
 
 MiroFish builds an ontology from seed documents for forward simulation.
 We reverse it: build an ontology from a spike event to map the causal landscape.
@@ -211,7 +211,7 @@ def extract_causal_ontology(
         except Exception as e:
             logger.warning("LLM ontology extraction failed: %s", e)
 
-    # Fallback: keyword-based extraction (matches current PCE behavior)
+    # Fallback: keyword-based extraction (matches depth-1 behavior)
     ontology = _fallback_extraction(spike_context)
     return ontology
 

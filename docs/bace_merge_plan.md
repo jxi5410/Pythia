@@ -1,3 +1,6 @@
+> **Status: COMPLETE.** All 5 slices merged as of 2026-03-12.
+> This document is retained for historical reference only.
+
 # BACE Merge Plan — Unified Backward Attribution Causal Engine
 
 ## Context
