@@ -160,11 +160,35 @@ async def attribute_stream(
                 step = event.get("step", "unknown")
                 data = event.get("data", {})
 
-                # For the final result, also extract hypotheses
+                # For the final result, also extract hypotheses and run governance
                 if step == "result":
                     hyps = _extract_hypotheses(data)
                     # Convert Pydantic models to dicts for JSON serialization
                     data["hypotheses"] = [h.model_dump() if hasattr(h, 'model_dump') else h.dict() if hasattr(h, 'dict') else h for h in hyps]
+
+                    # Run governance decision gate
+                    try:
+                        from src.core.governance import (
+                            get_governance, init_governance, create_audit_trail,
+                            GovernanceConfig,
+                        )
+                        try:
+                            config, breaker, validator, exporter = get_governance()
+                        except RuntimeError:
+                            init_governance()
+                            config, breaker, validator, exporter = get_governance()
+
+                        trail = create_audit_trail(spike, depth)
+                        decision, reason, factors = validator.evaluate(data, trail)
+                        data["governance"] = {
+                            "decision": decision,
+                            "reason": reason,
+                            "factors": factors,
+                            "run_id": trail.run_id,
+                        }
+                    except Exception as gov_err:
+                        logger.warning("Governance evaluation failed: %s", gov_err)
+                        data["governance"] = {"decision": "UNKNOWN", "reason": str(gov_err)}
 
                 yield f"event: {step}\ndata: {json.dumps(data, default=str)}\n\n"
 

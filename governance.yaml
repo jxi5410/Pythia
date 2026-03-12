@@ -1,0 +1,70 @@
+# Pythia Governance Configuration
+# All values can be overridden via PYTHIA_GOV_* environment variables.
+# Production values should be calibrated with Bangshan.
+
+# ─── Circuit Breakers (cost containment) ─────────────────────────────
+# These prevent runaway LLM spend. The circuit breaker trips permanently
+# until manually reset with admin_override=True.
+
+max_cost_per_hour: 10.0          # USD — max spend per rolling hour
+max_cost_per_run: 2.0            # USD — max spend per single BACE attribution
+max_tokens_per_run: 100000       # token ceiling per run
+emergency_shutdown_threshold: 50.0  # USD — cumulative spend triggers hard stop
+
+# ─── Decision Gates (confidence thresholds) ──────────────────────────
+# BACE output confidence determines how the attribution is routed:
+#   >= min_confidence_auto_relay  → AUTO_RELAY (action without human review)
+#   >= min_confidence_flag_review → FLAG_REVIEW (queued for human review)
+#   < min_confidence_flag_review  → REJECT (suppressed, logged only)
+
+min_confidence_auto_relay: 0.70   # 70%+ → auto-relay
+min_confidence_flag_review: 0.40  # 40-70% → flag for review, <40% → reject
+require_multi_agent_agreement: true
+min_agents_for_consensus: 3       # at least N agents must agree for AUTO
+
+# ─── Evidence Requirements ───────────────────────────────────────────
+# Minimum evidence items required for an AUTO_RELAY decision.
+# If evidence is below threshold, a high-confidence result is downgraded
+# to FLAG_REVIEW.
+
+min_evidence_items: 2
+require_temporal_alignment: true  # evidence must precede or be concurrent with spike
+
+# ─── Audit & Monitoring ──────────────────────────────────────────────
+# Audit trails are JSON files stored in the audit_trails/ directory.
+# Each BACE run produces one trail with: actions, hypotheses, evidence,
+# agent roster, decision gate output, cost, and timing.
+
+audit_trail_enabled: true
+audit_retention_days: 90
+log_all_agent_actions: true
+log_llm_inputs: false             # privacy: don't log full prompts by default
+log_llm_outputs: true             # log outputs for reproducibility
+
+# ─── Sandbox Controls ────────────────────────────────────────────────
+# sandbox_mode prevents real signals from being sent downstream.
+# Use for testing, demos, and paper trading.
+
+sandbox_mode: false
+
+# Allowlisted data sources (governance audit: which APIs we call)
+allowed_data_sources:
+  - kalshi.com
+  - polymarket.com
+  - manifold.markets
+  - google.com
+  - duckduckgo.com
+  - reddit.com
+  - reuters.com
+  - bloomberg.com
+  - bbc.com
+
+# Markets to skip (e.g., known test markets, low-quality markets)
+blocked_markets: []
+
+# ─── Depth Controls ──────────────────────────────────────────────────
+# Enterprise deployments can restrict max depth for cost control.
+# depth 1 = fast ($0.03), depth 2 = standard ($0.15), depth 3 = deep ($0.47)
+
+max_depth_allowed: 3
+default_depth: 2
