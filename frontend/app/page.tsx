@@ -359,16 +359,23 @@ function BACELive({ baceState }: { baceState: BACEState }) {
       )}
 
       {/* Live log */}
-      <div style={{ background: "#1a1a19", borderRadius: 6, padding: "14px 16px", fontFamily: mono, fontSize: 12, lineHeight: 1.8 }}>
+      <div style={{ background: "#1a1a19", borderRadius: 6, padding: "14px 16px", fontFamily: mono, fontSize: 12, lineHeight: 1.8, maxHeight: 320, overflowY: "auto" as const }}>
         {baceState.debateLog.map((line, i) => {
-          const isAgent = line.includes("→");
-          const isResult = line.startsWith("Result:") || line.startsWith("Final") || line.startsWith("Testing counterfactual");
+          const isAgentName = line.startsWith("⟫ ");
+          const isHypothesis = line.startsWith("  \"");
+          const isResult = line.startsWith("Result:") || line.startsWith("Final") || line.startsWith("Testing counterfactual") || line.startsWith("Counterfactual");
+          const isStatus = line.startsWith("Ontology:") || line.startsWith("News ") || line.startsWith("Spawned") || line.startsWith("Domain") || line.startsWith("Category") || line.startsWith("Generated") || line.startsWith("Initial") || line.startsWith("Debate");
           return (
             <div key={i} style={{
-              color: isResult ? C.accent : isAgent ? "#a8c77a" : "#a0a090",
-              opacity: 1, transition: "opacity 0.3s",
+              color: isAgentName ? "#7cb8e8" : isHypothesis ? "#c8c0a8" : isResult ? C.accent : isStatus ? "#a8c77a" : "#7a7a6e",
+              fontWeight: isAgentName ? 700 : 400,
+              fontStyle: isHypothesis ? "italic" as const : "normal" as const,
+              paddingLeft: isHypothesis ? 12 : 0,
+              marginTop: isAgentName ? 6 : 0,
             }}>
-              <span style={{ color: "#555", marginRight: 8 }}>{'>'}</span>{line}
+              {!isAgentName && !isHypothesis && <span style={{ color: "#444", marginRight: 8 }}>{'>'}</span>}
+              {isAgentName && <span style={{ color: "#556", marginRight: 6 }}>●</span>}
+              {line.replace("⟫ ", "")}
             </div>
           );
         })}
@@ -641,22 +648,34 @@ export default function Pythia() {
       const liveEntities: string[] = [];
       const liveAgents: string[] = [];
       const liveLog: string[] = [];
+      let pendingEventType = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
 
-        let eventType = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && eventType) {
-            try {
-              const data = JSON.parse(line.slice(6));
+        // Process complete events (separated by double newline)
+        while (buffer.includes("\n\n")) {
+          const idx = buffer.indexOf("\n\n");
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+
+          let eventType = "";
+          let eventData = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) continue;
+
+          try {
+            const data = JSON.parse(eventData);
 
               if (eventType === "context") {
                 currentStep = 0;
@@ -684,9 +703,10 @@ export default function Pythia() {
                 liveLog.push(`Domain evidence: ${data.count} items`);
               } else if (eventType === "proposal") {
                 currentStep = 5;
-                const agentName = data.agent;
+                const agentName = data.agent || "Agent";
                 for (const h of data.hypotheses || []) {
-                  liveLog.push(`${agentName} → ${h.cause} (${Math.round(h.confidence * 100)}%)`);
+                  liveLog.push(`⟫ ${agentName}`);
+                  liveLog.push(`  "${(h.cause || "").slice(0, 90)}…" — ${Math.round((h.confidence || 0) * 100)}%`);
                 }
               } else if (eventType === "debate") {
                 currentStep = 6;
@@ -696,23 +716,26 @@ export default function Pythia() {
                 liveLog.push(`Counterfactual testing: ${data.tested} hypotheses tested`);
               } else if (eventType === "result") {
                 finalResult = data;
+                console.log("[Pythia] Got result event, hypotheses:", data.hypotheses?.length || 0);
               } else if (eventType === "error") {
+                console.log("[Pythia] SSE error event:", data.error);
                 throw new Error(data.error || "Backend error");
               }
 
               // Update animation state with real data
-              setBaceState({
-                step: currentStep,
-                entities: [...liveEntities],
-                agentsActive: [...liveAgents],
-                debateLog: liveLog.slice(-12), // show last 12 lines
-                counterfactualsTested: currentStep >= 7 ? 1 : 0,
-              });
+              if (eventType !== "result" && eventType !== "done") {
+                setBaceState({
+                  step: currentStep,
+                  entities: [...liveEntities],
+                  agentsActive: [...liveAgents],
+                  debateLog: liveLog.slice(-14),
+                  counterfactualsTested: currentStep >= 7 ? 1 : 0,
+                });
+              }
 
-            } catch (parseErr) {
-              // Skip malformed events
-            }
-            eventType = "";
+          } catch (parseErr) {
+            if (eventType === "error") throw parseErr;
+            // Skip malformed data
           }
         }
       }
@@ -794,7 +817,7 @@ export default function Pythia() {
         {/* Input */}
         <div style={{ marginBottom: 32 }}>
           <div style={{ fontSize: 14, color: C.muted, marginBottom: 12, fontFamily: mono }}>
-            Paste a Polymarket URL or search for a market
+            Paste a Polymarket URL or search by keyword
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input type="text" value={input}

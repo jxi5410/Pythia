@@ -8,15 +8,19 @@ from typing import Dict, List
 logger = logging.getLogger(__name__)
 
 CATEGORY_KEYWORDS = {
-    "fed_rate": ["fed", "federal reserve", "fomc", "interest rate", "powell", "rate cut", "rate hike", "monetary policy"],
-    "inflation": ["inflation", "cpi", "pce", "consumer price", "deflation"],
-    "election": ["election", "president", "vote", "candidate", "ballot", "republican", "democrat", "trump", "biden"],
-    "crypto": ["bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "defi", "token"],
-    "trade_war": ["tariff", "trade war", "sanctions", "import duty", "trade deal", "embargo"],
-    "geopolitical": ["war", "ceasefire", "nato", "invasion", "military", "peace deal", "nuclear"],
-    "tech": ["openai", "gpt", "google", "apple", "ai regulation", "antitrust", "tiktok"],
-    "recession": ["recession", "gdp", "unemployment", "yield curve", "layoffs", "economic growth"],
-    "energy": ["oil", "opec", "natural gas", "energy", "petroleum", "barrel"],
+    "fed_rate": ["fed", "federal reserve", "fomc", "interest rate", "powell", "rate cut", "rate hike", "monetary policy", "basis points", "bps", "dovish", "hawkish", "tightening", "easing"],
+    "inflation": ["inflation", "cpi", "pce", "consumer price", "deflation", "stagflation", "price index", "core inflation"],
+    "election": ["election", "president", "vote", "candidate", "ballot", "republican", "democrat", "trump", "biden", "harris", "desantis", "nomination", "primary", "electoral", "governor", "senate", "congress", "midterm", "inauguration"],
+    "crypto": ["bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "defi", "token", "solana", "sol", "dogecoin", "memecoin", "nft", "stablecoin", "binance", "coinbase", "halving"],
+    "trade_war": ["tariff", "trade war", "sanctions", "import duty", "trade deal", "embargo", "export control", "trade deficit", "dumping", "wto", "trade policy", "customs"],
+    "geopolitical": ["war", "ceasefire", "nato", "invasion", "military", "peace deal", "nuclear", "iran", "israel", "ukraine", "russia", "china", "taiwan", "strait", "hormuz", "gaza", "hamas", "hezbollah", "missile", "drone", "troops", "conflict", "escalation", "de-escalation", "diplomacy", "treaty", "annex", "occupation", "territorial", "sovereignty", "regime", "coup", "assassination", "hostage", "refugee", "humanitarian", "un security council", "sanctions", "blockade", "naval", "airspace", "no-fly zone"],
+    "tech": ["openai", "gpt", "google", "apple", "ai regulation", "antitrust", "tiktok", "meta", "microsoft", "nvidia", "semiconductor", "chip", "ai safety", "deepfake", "autonomous", "spacex", "tesla"],
+    "recession": ["recession", "gdp", "unemployment", "yield curve", "layoffs", "economic growth", "jobs report", "nonfarm", "payroll", "consumer confidence", "pmi", "manufacturing", "contraction"],
+    "energy": ["oil", "opec", "natural gas", "energy", "petroleum", "barrel", "crude", "lng", "pipeline", "refinery", "saudi", "aramco", "shale", "renewables", "solar", "nuclear energy"],
+    "climate": ["climate", "carbon", "emissions", "paris agreement", "cop", "net zero", "green deal", "wildfire", "hurricane", "flood", "drought", "weather"],
+    "health": ["pandemic", "vaccine", "covid", "who", "fda", "drug approval", "pharma", "outbreak", "epidemic", "bird flu", "h5n1"],
+    "sports": ["nba", "nfl", "premier league", "champions league", "world cup", "olympics", "fifa", "super bowl", "playoff", "championship", "mvp", "transfer"],
+    "entertainment": ["oscar", "grammy", "emmy", "box office", "streaming", "netflix", "disney", "album", "concert", "gta"],
 }
 
 
