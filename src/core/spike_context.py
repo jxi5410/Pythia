@@ -1,24 +1,35 @@
 """Spike context builder extracted from causal_v2."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from .market_classifier import classify_market, extract_entities_llm
 
 
+def _parse_naive(ts) -> datetime:
+    """Parse a timestamp string to a naive (UTC) datetime.
+
+    Handles: ISO with Z, ISO with +00:00, naive ISO, already-datetime.
+    Always returns a naive datetime to avoid tz-aware vs tz-naive comparison errors.
+    """
+    if isinstance(ts, datetime):
+        return ts.replace(tzinfo=None)
+    if isinstance(ts, str):
+        ts = ts.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts)
+        return dt.replace(tzinfo=None)
+    return ts
+
+
 def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) -> List[Dict]:
     """Find other spikes that occurred within the time window."""
     concurrent = []
-    target_ts = target_spike.timestamp
-    if isinstance(target_ts, str):
-        target_ts = datetime.fromisoformat(target_ts)
+    target_ts = _parse_naive(target_spike.timestamp)
 
     for spike in all_spikes:
         if spike.market_id == target_spike.market_id:
             continue
-        spike_ts = spike.timestamp
-        if isinstance(spike_ts, str):
-            spike_ts = datetime.fromisoformat(spike_ts)
+        spike_ts = _parse_naive(spike.timestamp)
         diff = abs((spike_ts - target_ts).total_seconds())
         if diff <= window_hours * 3600:
             concurrent.append({
@@ -32,9 +43,7 @@ def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) 
 
 def build_spike_context(spike, all_recent_spikes=None, entity_llm=None) -> Dict:
     """Build full context for a spike before attribution."""
-    ts = spike.timestamp
-    if isinstance(ts, str):
-        ts = datetime.fromisoformat(ts)
+    ts = _parse_naive(spike.timestamp)
 
     correlated = find_concurrent_spikes(spike, all_recent_spikes or [], window_hours=2)
     entities = extract_entities_llm(spike.market_title, llm_call=entity_llm)

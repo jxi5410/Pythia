@@ -180,37 +180,43 @@ function generateMockAttribution(spike: Spike, question: string): Attribution {
 
 function generateBACEStates(spike: Spike, question: string): BACEState[] {
   const q = question.slice(0, 30);
+
+  // Extract simple entities from the question
+  const words = question.replace(/[?.,!]/g, "").split(/\s+/);
+  const stopwords = new Set(["will", "the", "a", "an", "by", "in", "of", "to", "be", "is", "are", "was", "or", "and", "if", "its", "this", "that", "for", "on", "at", "with", "from", "before", "after", "not", "no", "yes"]);
+  const entities = words
+    .filter(w => w.length > 2 && !stopwords.has(w.toLowerCase()))
+    .filter((w, i, arr) => arr.indexOf(w) === i)
+    .slice(0, 5);
+
   return [
-    { step: 0, entities: [], agentsActive: [], debateLog: ["Classifying market domain…", `Market: "${q}…"`, "Category: macro/policy"], counterfactualsTested: 0 },
-    { step: 1, entities: [], agentsActive: [], debateLog: [`Spike: ${spike.direction === "up" ? "+" : "-"}${(spike.magnitude*100).toFixed(1)}% at ${new Date(spike.timestamp).toLocaleTimeString("en-US", {hour:"2-digit",minute:"2-digit"})}`, "Validating: 3.2σ from mean (p=0.003)", "Result: statistically significant — proceeding"], counterfactualsTested: 0 },
-    { step: 2, entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"], agentsActive: [], debateLog: ["Extracting entities from market question + context…", `Found 5 entities, 3 relationships`], counterfactualsTested: 0 },
-    { step: 3, entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"], agentsActive: [], debateLog: ["Fetching: Google News RSS (4 results)", "Fetching: DuckDuckGo News (3 results)", "Fetching: Reddit r/economics, r/polymarket (6 threads)", "7 unique articles in spike window"], counterfactualsTested: 0 },
-    { step: 4, entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"], agentsActive: [], debateLog: ["CME FedWatch: rate hike prob +12%", "SPY: -1.4% (13:45-14:15 ET)", "On-chain: $1.8M block trade detected", "Orderbook: ask side swept at 47-52¢"], counterfactualsTested: 0 },
-    { step: 5, entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"],
+    { step: 0, entities: [], agentsActive: [], debateLog: ["Classifying market domain…", `Market: "${q}…"`, "Identifying category…"], counterfactualsTested: 0 },
+    { step: 1, entities: [], agentsActive: [], debateLog: [`Spike: ${spike.direction === "up" ? "+" : "-"}${(spike.magnitude*100).toFixed(1)}% at ${new Date(spike.timestamp).toLocaleTimeString("en-US", {hour:"2-digit",minute:"2-digit"})}`, "Validating statistical significance…", "Result: exceeds threshold — proceeding"], counterfactualsTested: 0 },
+    { step: 2, entities, agentsActive: [], debateLog: ["Extracting entities from market question + context…", `Found ${entities.length} entities`], counterfactualsTested: 0 },
+    { step: 3, entities, agentsActive: [], debateLog: ["Fetching: Google News RSS…", "Fetching: DuckDuckGo News…", "Fetching: Reddit (category-mapped subreddits)…", "Filtering articles by spike temporal window…"], counterfactualsTested: 0 },
+    { step: 4, entities, agentsActive: [], debateLog: ["Fetching domain-specific data…", "Checking equities correlation…", "Checking orderbook signals…", "Aggregating evidence items…"], counterfactualsTested: 0 },
+    { step: 5, entities,
       agentsActive: ["Macro Policy Analyst", "Informed Flow Analyst", "Narrative & Sentiment", "Cross-Market Contagion", "Geopolitical Risk", "Devil's Advocate", "Null Hypothesis"],
       debateLog: ["Spawning 7 core + 2 adversarial agents", "Each agent receives: spike context + relevant evidence"], counterfactualsTested: 0 },
-    { step: 6,
-      entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"],
+    { step: 6, entities,
       agentsActive: ["Macro Policy Analyst", "Informed Flow Analyst", "Narrative & Sentiment", "Cross-Market Contagion", "Geopolitical Risk", "Devil's Advocate", "Null Hypothesis"],
       debateLog: [
-        "Macro Policy → proposes: FOMC hawkish dissent (conf: 82%)",
-        "Informed Flow → proposes: whale pre-positioning (conf: 71%)",
-        "Narrative → proposes: viral thread primed sentiment (conf: 54%)",
-        "Cross-Market → proposes: SPY contagion (conf: 45%)",
-        "Devil's Advocate → challenges: convergence, not single cause (conf: 28%)",
-        "Null Hypothesis → confirms: spike is real, 3.2σ (conf: 5%)",
-        "Geopolitical → null finding: no geo catalyst (conf: 12%)",
+        "Macro Policy → generating hypothesis…",
+        "Informed Flow → analyzing pre-spike order flow…",
+        "Narrative → scanning social media sentiment…",
+        "Cross-Market → checking correlated asset moves…",
+        "Devil's Advocate → preparing challenges…",
+        "Null Hypothesis → running statistical baseline…",
+        "Geopolitical → scanning for geopolitical triggers…",
       ],
       counterfactualsTested: 0 },
-    { step: 7,
-      entities: ["Federal Reserve", "FOMC", "Interest rates", "March meeting", "Rate expectations"],
+    { step: 7, entities,
       agentsActive: ["Macro Policy Analyst", "Informed Flow Analyst", "Narrative & Sentiment", "Cross-Market Contagion", "Geopolitical Risk", "Devil's Advocate", "Null Hypothesis"],
       debateLog: [
-        "Testing counterfactual: remove FOMC → spike disappears (strong)",
-        "Testing counterfactual: remove whale → spike delayed 22m (moderate)",
-        "Testing counterfactual: remove social → spike 15% smaller (weak)",
-        "Confidence calibration: weighting by timing + evidence strength",
-        "Final synthesis: FOMC hawkish dissent is primary cause (82%)",
+        "Testing counterfactuals for each hypothesis…",
+        "Calibrating confidence scores by timing + evidence strength…",
+        "Cross-referencing agent proposals for consensus…",
+        "Synthesizing final attribution…",
       ],
       counterfactualsTested: 3 },
   ];

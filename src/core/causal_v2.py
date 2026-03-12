@@ -48,6 +48,24 @@ logger = logging.getLogger(__name__)
 
 NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
 
+
+def _parse_naive_ts(ts) -> datetime:
+    """Parse a timestamp to a naive (UTC) datetime.
+
+    Handles ISO strings with Z, +00:00, or naive. Always strips tzinfo
+    to avoid tz-aware vs tz-naive comparison errors on Python 3.14+.
+    """
+    if isinstance(ts, datetime):
+        return ts.replace(tzinfo=None)
+    if isinstance(ts, str):
+        ts = ts.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(ts)
+            return dt.replace(tzinfo=None)
+        except ValueError:
+            return datetime.now()
+    return datetime.now()
+
 # ---------------------------------------------------------------------------
 # Layer 1: Context Builder
 # ---------------------------------------------------------------------------
@@ -117,16 +135,12 @@ def extract_entities_llm(title: str, llm_call=None) -> List[str]:
 def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) -> List[Dict]:
     """Find other spikes that occurred within the time window."""
     concurrent = []
-    target_ts = target_spike.timestamp
-    if isinstance(target_ts, str):
-        target_ts = datetime.fromisoformat(target_ts)
+    target_ts = _parse_naive_ts(target_spike.timestamp)
 
     for spike in all_spikes:
         if spike.id == target_spike.id:
             continue
-        spike_ts = spike.timestamp
-        if isinstance(spike_ts, str):
-            spike_ts = datetime.fromisoformat(spike_ts)
+        spike_ts = _parse_naive_ts(spike.timestamp)
         diff = abs((spike_ts - target_ts).total_seconds())
         if diff <= window_hours * 3600:
             concurrent.append({
@@ -140,9 +154,7 @@ def find_concurrent_spikes(target_spike, all_spikes, window_hours: float = 2.0) 
 
 def build_spike_context(spike, all_recent_spikes=None, entity_llm=None) -> Dict:
     """Build full context for a spike before attribution."""
-    ts = spike.timestamp
-    if isinstance(ts, str):
-        ts = datetime.fromisoformat(ts)
+    ts = _parse_naive_ts(spike.timestamp)
 
     correlated = find_concurrent_spikes(spike, all_recent_spikes or [], window_hours=2)
 
@@ -234,8 +246,8 @@ def _parse_published_date(date_str: str) -> Optional[datetime]:
 def filter_by_temporal_window(articles: List[Dict], window_start: str, window_end: str) -> List[Dict]:
     """Keep only articles published within the temporal window."""
     try:
-        ws = datetime.fromisoformat(window_start)
-        we = datetime.fromisoformat(window_end)
+        ws = _parse_naive_ts(window_start)
+        we = _parse_naive_ts(window_end)
     except:
         return articles  # Can't parse window, return all
 
