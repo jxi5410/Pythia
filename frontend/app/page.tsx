@@ -756,8 +756,10 @@ export default function Pythia() {
         }
       }
       // If we got here, SSE didn't produce a usable result — fall through
-    } catch {
+      console.log("[Pythia] SSE completed. finalResult:", finalResult ? "exists" : "null", "hypotheses:", finalResult?.hypotheses?.length || 0);
+    } catch (sseErr) {
       // SSE failed — backend not running or connection error
+      console.log("[Pythia] SSE failed:", sseErr);
     }
 
     // Fallback: mock data with animation
