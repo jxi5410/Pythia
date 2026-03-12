@@ -54,3 +54,5 @@ class Config:
 
     # Attribution engine mode: fast (PCE), deep (RCE), shadow (PCE + RCE eval)
     ATTRIBUTION_MODE = os.getenv("PYTHIA_ATTRIBUTION_MODE", "fast").strip().lower()
+    # BACE depth: 1=fast, 2=standard, 3=deep
+    BACE_DEPTH = int(os.getenv("PYTHIA_BACE_DEPTH", "2"))
