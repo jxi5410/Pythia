@@ -110,6 +110,24 @@ export default function AttributionPage() {
 
   // Show continue button when complete — no forced auto-navigate
   const [showContinue, setShowContinue] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Elapsed timer while running
+  useEffect(() => {
+    if (run.isRunning && !elapsedRef.current) {
+      const start = Date.now();
+      elapsedRef.current = setInterval(() => {
+        setElapsedSec(Math.floor((Date.now() - start) / 1000));
+      }, 1000);
+    }
+    if (!run.isRunning && elapsedRef.current) {
+      clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
+    }
+    return () => { if (elapsedRef.current) clearInterval(elapsedRef.current); };
+  }, [run.isRunning]);
+
   useEffect(() => {
     if (run.attribution && !run.isRunning) {
       setShowContinue(true);
@@ -132,7 +150,7 @@ export default function AttributionPage() {
             {spike.direction === 'up' ? '+' : '-'}{(spike.magnitude * 100).toFixed(1)}%
           </span>
           {' '}at {new Date(spike.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-          {' · '}{run.isLive ? <span style={{ color: C.yes }}>● Live</span> : run.isRunning ? <span style={{ color: C.accent }}>● Running BACE depth 2</span> : <span style={{ color: C.muted }}>● Simulated</span>}
+          {' · '}{run.isLive ? <span style={{ color: C.yes }}>● Live</span> : run.isRunning ? <span style={{ color: C.accent }}>● Running BACE depth 2 — {elapsedSec}s</span> : <span style={{ color: C.muted }}>● Simulated</span>}
         </div>
 
         {error && <div style={{ padding: '12px 16px', background: '#fdf0ed', borderRadius: 6, fontFamily: mono, fontSize: 12, color: C.accent, marginBottom: 16 }}>{error}</div>}

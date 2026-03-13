@@ -768,22 +768,45 @@ export default function BACEGraphAnimation({ baceState, graphState }: BACEGraphA
       <div style={{
         background: '#1a1a19', borderRadius: 6, padding: '14px 16px',
         fontFamily: mono, fontSize: 12, lineHeight: 1.8,
-        maxHeight: 200, overflowY: 'auto' as const, marginTop: 12,
+        maxHeight: 240, overflowY: 'auto' as const, marginTop: 12,
       }}>
+        {baceState.debateLog.length === 0 && (
+          <div style={{ color: '#555', fontStyle: 'italic' as const }}>
+            <span style={{ color: '#444', marginRight: 8 }}>{'>'}</span>
+            Connecting to BACE engine — LLM warming up…
+          </div>
+        )}
         {baceState.debateLog.map((line, i) => {
           const isAgentName = line.startsWith('⟫ ');
-          const isHypothesis = line.startsWith('  "');
-          const isResult = line.startsWith('Result:') || line.startsWith('Final') || line.startsWith('Testing') || line.startsWith('Counterfactual') || line.startsWith('Scenarios:');
-          const isStatus = line.startsWith('Ontology:') || line.startsWith('News ') || line.startsWith('Spawned') || line.startsWith('Domain') || line.startsWith('Category') || line.startsWith('Generated') || line.startsWith('Initial') || line.startsWith('Debate') || line.startsWith('Graph ') || line.startsWith('Interaction');
+          const isHypothesis = line.startsWith('  "') || line.startsWith('  ');
+          const isRoundHeader = line.startsWith('━━');
+          const isSimAction = /^[⚔✓↩✕📄↕⊕●•]/.test(line);
+          const isChallenge = line.includes('CHALLENGE');
+          const isSupport = line.includes('SUPPORT') || line.startsWith('✓');
+          const isRebut = line.includes('REBUT');
+          const isConcede = line.includes('CONCEDE') || line.includes('CONVERGED');
+          const isResult = line.startsWith('Result:') || line.startsWith('Final') || line.startsWith('Simulation complete') || line.startsWith('Scenarios:');
+          const isStatus = line.startsWith('Ontology:') || line.startsWith('News ') || line.startsWith('Spawned') || line.startsWith('Domain') || line.startsWith('Category') || line.startsWith('Generated') || line.startsWith('Initial') || line.startsWith('Debate') || line.startsWith('Graph ') || line.startsWith('Interaction') || line.startsWith('Convergence') || line.startsWith('Divergence');
           return (
             <div key={i} style={{
-              color: isAgentName ? '#7cb8e8' : isHypothesis ? '#c8c0a8' : isResult ? C.accent : isStatus ? '#a8c77a' : '#7a7a6e',
-              fontWeight: isAgentName ? 700 : 400,
-              fontStyle: isHypothesis ? 'italic' as const : 'normal' as const,
-              paddingLeft: isHypothesis ? 12 : 0,
-              marginTop: isAgentName ? 6 : 0,
+              color: isRoundHeader ? '#e8a838' :
+                     isChallenge ? '#e8736a' :
+                     isSupport ? '#a8c77a' :
+                     isRebut ? '#7cb8e8' :
+                     isConcede ? '#888' :
+                     isAgentName ? '#7cb8e8' :
+                     isSimAction ? '#c8c0a8' :
+                     isHypothesis ? '#c8c0a8' :
+                     isResult ? C.accent :
+                     isStatus ? '#a8c77a' : '#7a7a6e',
+              fontWeight: isAgentName || isRoundHeader ? 700 : isSimAction ? 500 : 400,
+              fontStyle: (isHypothesis && !isSimAction) ? 'italic' as const : 'normal' as const,
+              paddingLeft: isHypothesis && !isSimAction ? 12 : 0,
+              marginTop: isAgentName || isRoundHeader ? 6 : 0,
+              borderTop: isRoundHeader ? '1px solid #333' : 'none',
+              paddingTop: isRoundHeader ? 6 : 0,
             }}>
-              {!isAgentName && !isHypothesis && <span style={{ color: '#444', marginRight: 8 }}>{'>'}</span>}
+              {!isAgentName && !isHypothesis && !isSimAction && !isRoundHeader && <span style={{ color: '#444', marginRight: 8 }}>{'>'}</span>}
               {isAgentName && <span style={{ color: '#556', marginRight: 6 }}>●</span>}
               {line.replace('⟫ ', '')}
             </div>

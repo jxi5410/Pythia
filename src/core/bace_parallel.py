@@ -329,9 +329,31 @@ async def attribute_spike_streaming(
         "entities": context.get("entities", []),
     }}
 
-    # Step 2: Ontology extraction
+    # Step 2 + 3: Ontology extraction + early evidence gathering IN PARALLEL
+    # Ontology takes 20-40s (strong LLM). Start evidence search using basic entities
+    # from context while ontology runs, then merge with ontology-driven queries.
     from .bace_ontology import extract_causal_ontology
-    ontology = await _run_in_thread(extract_causal_ontology, context, llm_strong)
+
+    async def early_evidence():
+        """Quick evidence search using context entities while ontology builds."""
+        try:
+            from .bace_ontology import CausalOntology
+            # Create a minimal ontology from context entities for early search
+            early_ont = CausalOntology(
+                spike_market_id=context.get("market_id", ""),
+                spike_market_title=context.get("market_title", ""),
+                search_queries=context.get("entities", [])[:5],
+            )
+            return await gather_evidence_parallel(early_ont, context)
+        except Exception:
+            return {"all": []}
+
+    # Run both concurrently
+    ontology_task = asyncio.ensure_future(_run_in_thread(extract_causal_ontology, context, llm_strong))
+    early_ev_task = asyncio.ensure_future(early_evidence())
+
+    # Wait for ontology (the bottleneck)
+    ontology = await ontology_task
 
     yield {"step": "ontology", "data": {
         "entity_count": len(ontology.entities),
@@ -340,8 +362,19 @@ async def attribute_spike_streaming(
         "entities": [e.name for e in ontology.entities[:10]],
     }}
 
-    # Step 3: News evidence (PARALLEL)
-    evidence = await gather_evidence_parallel(ontology, context)
+    # Now do the full evidence search with ontology terms
+    full_evidence = await gather_evidence_parallel(ontology, context)
+
+    # Merge early evidence with full evidence (deduplicate)
+    early_ev = await early_ev_task
+    seen_headlines = set(e.get("headline", "")[:50].lower() for e in full_evidence.get("all", []))
+    for e in early_ev.get("all", []):
+        key = e.get("headline", "")[:50].lower()
+        if key not in seen_headlines:
+            full_evidence.setdefault("all", []).append(e)
+            seen_headlines.add(key)
+
+    evidence = full_evidence
     n_evidence = len(evidence.get("all", []))
 
     yield {"step": "evidence", "data": {"count": n_evidence}}
@@ -381,7 +414,7 @@ async def attribute_spike_streaming(
     # Step 6: Multi-round agent simulation
     # Agents autonomously debate over N rounds, each action logged and streamed
     interaction_data = None
-    sim_rounds = 3 if depth >= 2 else 1
+    sim_rounds = 3 if depth >= 3 else 2 if depth >= 2 else 1
     sim_actions_log = []  # Collect all actions for interrogation context
     try:
         from .bace_simulation import run_agent_simulation
