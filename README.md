@@ -1,8 +1,8 @@
 # Pythia
 
-**Prediction market intelligence engine. Detects probability spikes, attributes their causes, and predicts downstream market effects.**
+**Prediction market intelligence engine. Detects probability spikes across Polymarket and Kalshi, then explains *why* they happened using multi-agent causal reasoning.**
 
-Built for institutional traders and quant researchers. Monitors Polymarket and Kalshi in real-time.
+Built for institutional traders and quant researchers. Two-person team augmented by AI agents for execution.
 
 **Demo:** [pythia-demo.vercel.app](https://pythia-demo.vercel.app)
 
@@ -11,9 +11,9 @@ Built for institutional traders and quant researchers. Monitors Polymarket and K
 ## What Pythia Does
 
 1. **Detects** — Monitors prediction markets for probability spikes (≥5% in 1h), volume anomalies (≥3x baseline), maker edge opportunities, and momentum breakouts
-2. **Attributes** — Identifies *why* a spike happened using BACE (Backward Attribution Causal Engine) — a depth-configurable pipeline combining multi-agent reasoning, domain-specific evidence, and statistical validation
-3. **Predicts** — Walks the causal graph forward to generate signals for downstream markets that haven't moved yet
-4. **Tracks** — Resolves predictions against actual prices. Measures hit rate, lead time, and calibration.
+2. **Attributes** — Identifies *why* a spike happened using BACE (Backward Attribution Causal Engine) — a depth-configurable multi-agent system combining adversarial debate, domain-specific evidence, and scenario clustering
+3. **Presents** — Clusters competing hypotheses into Primary, Alternative, and Dismissed scenarios with evidence chains, confidence scores, and "what breaks this" analysis
+4. **Interrogates** — Users can question individual agents in-character about their reasoning, evidence, and confidence post-attribution
 
 ---
 
@@ -22,20 +22,18 @@ Built for institutional traders and quant researchers. Monitors Polymarket and K
 One engine, three depth levels. Configure via `PYTHIA_BACE_DEPTH=1|2|3`.
 
 ```
-Detection → BACE Attribution → Attributor Storage → Forward Signals → Track Record
-               │                                                          │
-          depth 1|2|3                                                     │
-               │                                                          │
-  ┌────────────┼─────────────────────────────┐                           │
-  │ Depth 1    │ Depth 2 (default)           │ Depth 3                   │
-  │ FAST       │ STANDARD                    │ DEEP                      │
-  │ ~3 LLM     │ ~15 LLM calls              │ ~95 LLM calls             │
-  │ $0.03      │ $0.15/spike                 │ $0.47/spike               │
-  │ Single-shot│ Multi-agent proposals       │ Full adversarial debate   │
-  │ reasoning  │ + domain evidence           │ + counterfactual testing  │
-  └────────────┴─────────────────────────────┘                           │
-                                                                          │
-       Evaluated by track_record.py ◄─────────────────────────────────────┘
+Detection → BACE Attribution → Scenario Clustering → Graph Memory
+               │
+          depth 1|2|3
+               │
+  ┌────────────┼─────────────────────────────┐
+  │ Depth 1    │ Depth 2 (default)           │ Depth 3                 │
+  │ FAST       │ STANDARD                    │ DEEP                    │
+  │ ~3 LLM     │ ~15 LLM calls              │ ~95 LLM calls           │
+  │ $0.03      │ $0.15/spike                 │ $0.47/spike             │
+  │ Single-shot│ Multi-agent proposals       │ Full adversarial debate │
+  │ reasoning  │ + domain evidence           │ + counterfactual testing│
+  └────────────┴─────────────────────────────┘
 ```
 
 ### Depth 1 — Fast (~3 LLM calls, ~$0.03/spike)
@@ -44,15 +42,15 @@ Single-shot attribution: extract entities → retrieve news → filter candidate
 
 ### Depth 2 — Standard (~15 LLM calls, ~$0.15/spike) **← default**
 
-Multi-agent proposals with domain-specific evidence. 9 agents each propose hypotheses from different data perspectives. No debate rounds — a synthesis step selects the strongest hypothesis.
+Multi-agent proposals with domain-specific evidence. 9 agents each propose hypotheses from different data perspectives. Synthesis step selects the strongest hypothesis and clusters into scenarios.
 
 ### Depth 3 — Deep (~95 LLM calls, ~$0.47/spike)
 
 Everything in depth 2 plus 2 rounds of adversarial debate (agents critique each other's hypotheses) and counterfactual testing (would the spike persist if this cause hadn't happened?).
 
-### Agent Roster
+### Multi-Agent Architecture
 
-**7 core agents** (always active):
+**9 specialized agents**, each with domain-specific evidence providers (not generic LLM calls):
 
 | Agent | Domain | Evidence Sources |
 |---|---|---|
@@ -63,23 +61,43 @@ Everything in depth 2 plus 2 rounds of adversarial debate (agents critique each 
 | Narrative & Sentiment | Social media, crowd behavior | Twitter/X signals |
 | Informed Flow Analyst | Insider vs retail detection | Orderbook, equities, crypto flows |
 | Cross-Market Contagion | Propagation from other markets | Equities, fixed income, crypto |
+| Devil's Advocate | Challenges all hypotheses | Cross-references all evidence |
+| Null Hypothesis | Tests if spike is noise | Statistical baselines |
 
-**2 adversarial agents** (always active): Devil's Advocate + Null Hypothesis
+**8 autonomous action types:** PROPOSE, SUPPORT, CHALLENGE, REBUT, UPDATE_CONFIDENCE, PRESENT_EVIDENCE, CONCEDE, SYNTHESIZE
 
-**6 conditional agents** (spawned per category): On-chain, ETF Flows (crypto), Fixed Income, FX/Carry (fed_rate), Supply Chain (tariffs), Defense Intel (geopolitical)
+**Confidence from behavior** — evolves from debate actions (challenges, concessions, rebuttals), not self-assessed scores.
 
-### Timing-First Reasoning
+### Scenario-Based Output
 
-Every hypothesis must classify its impact speed: immediate (minutes), fast (hours), delayed (days), or slow (weeks). Evidence items carry timing metadata relative to the spike (before/concurrent/after). Agents are instructed that causes must precede effects and concurrent evidence is ambiguous.
+Hypotheses are clustered by causal mechanism into competing scenarios:
 
-### Statistical Validation (all depths, zero LLM cost)
+- **Primary** — Highest-confidence explanation with full evidence chain
+- **Alternative** — Plausible alternatives with supporting evidence
+- **Dismissed** — Considered and rejected, with rejection reasoning
 
-| Layer | Library | What |
-|---|---|---|
-| Counterfactual | pyCausalImpact | Bayesian test — exits early if spike is noise |
-| DAG Refutation | DoWhy | Formal causal graph + refutation tests |
-| Effect Prediction | EconML | CausalForestDML predicts expected magnitude |
-| Causal Discovery | Tigramite (PCMCI) | Directional discovery between markets |
+Each scenario includes: confidence score, lead + supporting agents, evidence chain, causal narrative, "what breaks this scenario", and temporal fit analysis.
+
+### Governance Layer
+
+- **Circuit breakers** — Cost and runtime limits per BACE run
+- **Decision gates** — AUTO_RELAY / FLAG_REVIEW / REJECT classification
+- **Audit trails** — Immutable JSONL logging of every agent action
+- **Autonomy levels** — L0 (human-controlled) through L5 (full autonomy)
+- **Configurable** via `governance.yaml` or `PYTHIA_GOV_*` env vars
+
+---
+
+## Frontend — Staged Intelligence Dashboard
+
+4-stage workflow, each with its own route (shareable, resumable):
+
+1. **Market Selection** (`/`) — Search Polymarket/Kalshi markets, spike count badges, interactive price charts
+2. **Attribution** (`/attribution`) — Live BACE run with force-directed knowledge graph growing from SSE events, real-time action feed (CHALLENGE=red, SUPPORT=green, REBUT=blue)
+3. **Scenarios** (`/scenarios`) — Primary scenario with evidence chains and agent consensus. Alternatives expandable. Dismissed with rejection reasoning. "What breaks this" callouts.
+4. **Interrogation** (`/interrogation`) — Select a specific agent, interrogate it in-character about its analysis, evidence, and reasoning via streaming chat
+
+**Visualization:** Force-directed knowledge graph where entities and agents appear organically as SSE streams them. Convergence = clustering, divergence = conflict edges.
 
 ---
 
@@ -96,11 +114,11 @@ python3 run.py
 # With paper trading automation
 python3 run.py --auto
 
+# API server (SSE streaming for frontend)
+uvicorn src.api.server:app --reload
+
 # Backfill historical spikes (recommended first run)
 python3 scripts/backfill_spikes.py --markets 50
-
-# API server
-uvicorn src.core.api:app --reload
 ```
 
 ### Frontend
@@ -143,7 +161,6 @@ PYTHIA_BACE_DEPTH=2
 | `VOLUME_ANOMALY` | ≥3x normal volume |
 | `MAKER_EDGE` | ≥1% spread |
 | `MOMENTUM_BREAKOUT` | MA crossover |
-| `CAUSAL_PROPAGATION` | Forward signal via causal graph |
 
 ## Risk Controls (Paper Trading)
 
@@ -159,49 +176,77 @@ PYTHIA_BACE_DEPTH=2
 ```
 pythia/
 ├── src/
+│   ├── api/
+│   │   └── server.py                    # FastAPI + SSE streaming endpoints
 │   ├── core/
 │   │   ├── main.py                      # Orchestrator — polling + signal loop
 │   │   ├── bace.py                      # BACE entrypoint — attribute_spike(depth=1|2|3)
-│   │   ├── causal_v2.py                 # Depth 1: single-shot fast attribution
-│   │   ├── bace_debate.py              # Depth 2-3: multi-agent debate engine
+│   │   ├── bace_parallel.py             # Async BACE pipeline with SSE streaming
+│   │   ├── bace_simulation.py           # Multi-round agent debate (8 action types)
+│   │   ├── bace_debate.py              # Debate engine (proposals, critique, counterfactual)
 │   │   ├── bace_agents.py              # Agent personas, prompts, timing rules
-│   │   ├── bace_ontology.py            # Entity-relationship extraction
+│   │   ├── bace_scenarios.py           # Scenario clustering (primary/alt/dismissed)
+│   │   ├── bace_ontology.py            # Entity-relationship extraction (GraphRAG)
 │   │   ├── bace_evidence_provider.py   # Per-agent domain-specific data
-│   │   ├── market_classifier.py         # Market category classification
+│   │   ├── bace_interaction.py         # Agent interview mode
+│   │   ├── bace_graph_memory.py        # GraphRAG entity/relationship storage
+│   │   ├── governance.py               # Circuit breakers, audit trails, decision gates
+│   │   ├── causal_v2.py                # Depth 1: single-shot fast attribution
+│   │   ├── llm_integration.py          # Multi-backend LLM (Qwen/DeepSeek/Claude/Ollama)
+│   │   ├── market_classifier.py        # Market category classification
 │   │   ├── spike_context.py            # Spike context builder
-│   │   ├── attributor_engine.py         # Persistent causal entities + lifecycle
+│   │   ├── confluence.py               # Multi-layer signal convergence detection
 │   │   ├── forward_signals.py          # Causal graph propagation → predictions
 │   │   ├── track_record.py             # Prediction accuracy tracking
-│   │   ├── llm_integration.py          # Multi-backend LLM (Qwen/DeepSeek/Claude/Ollama)
-│   │   ├── counterfactual.py           # CausalImpact validation
-│   │   ├── causal_dag.py              # DoWhy formal DAGs
-│   │   ├── heterogeneous_effects.py    # EconML effect prediction
-│   │   ├── intelligence_api.py         # REST endpoints
-│   │   ├── feedback.py                 # Attribution feedback loop
 │   │   ├── database.py                 # SQLite persistence
 │   │   ├── evidence/
 │   │   │   └── news_retrieval.py       # Shared news retrieval (4 sources)
 │   │   └── evaluation/
 │   │       └── attribution_compare.py  # Depth comparison persistence
-│   ├── detection/
-│   │   └── detector.py                 # Signal detection (4 strategies)
 │   ├── connectors/
 │   │   ├── polymarket.py               # Polymarket CLOB API
 │   │   └── kalshi.py                   # Kalshi event contracts
+│   ├── detection/
+│   │   └── detector.py                 # Signal detection (4 strategies)
 │   ├── trading/
 │   │   ├── paper_trading.py            # Simulated execution + P&L
 │   │   └── automation.py               # Auto-trade controller
 │   └── alerts/
 │       └── alerts.py                   # Telegram notifications
-├── frontend/                            # Next.js 16 dashboard (Vercel)
-│   ├── app/page.tsx                    # Hero panel + market cards
-│   ├── components/SpikeChart.tsx       # Price chart with spike overlay
-│   └── components/CausalGraphView.tsx  # Attribution pipeline visualization
+├── frontend/                            # Next.js — Staged Intelligence Dashboard
+│   ├── app/
+│   │   ├── page.tsx                    # Stage 1: Market selection + search
+│   │   ├── attribution/page.tsx        # Stage 2: Live BACE run + graph
+│   │   ├── scenarios/page.tsx          # Stage 3: Scenario view
+│   │   ├── interrogation/page.tsx      # Stage 4: Agent interview
+│   │   └── api/                        # Next.js API routes (proxy to backend)
+│   │       ├── polymarket/             # Market search + history
+│   │       ├── attribute/              # BACE attribution proxy
+│   │       └── markets/                # Market data
+│   ├── components/
+│   │   ├── BACEGraphAnimation.tsx      # Force-directed knowledge graph
+│   │   ├── ScenarioPanel.tsx           # Scenario display + evidence chains
+│   │   ├── InterrogationChat.tsx       # Agent interview streaming chat
+│   │   ├── SpikeChart.tsx              # Price chart with spike overlay
+│   │   └── NavHeader.tsx               # Stage progression breadcrumb
+│   ├── lib/
+│   │   └── run-store.tsx               # Cross-stage state management
+│   └── types/
+├── governance.yaml                      # Governance config (circuit breakers, gates)
 ├── scripts/
 │   ├── backfill_spikes.py              # Historical spike ingestion
 │   └── retrain_model.py               # Weekly model retraining
 └── tests/
 ```
+
+---
+
+## Deployment
+
+| Component | Platform | URL |
+|---|---|---|
+| Backend API | Railway (auto-deploy from GitHub) | `pythia-production.up.railway.app` |
+| Frontend | Vercel (auto-deploy from GitHub) | `pythia-demo.vercel.app` |
 
 ---
 
