@@ -315,6 +315,17 @@ class GraphDelta(BaseModel):
     timestamp: datetime = Field(default_factory=_utcnow)
 
 
+class GraphSnapshot(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    run_id: UUID
+    node_count: int = Field(default=0, ge=0)
+    edge_count: int = Field(default=0, ge=0)
+    delta_sequence_at: int = Field(default=0, ge=0)
+    nodes_json: dict[str, Any] = Field(default_factory=dict)
+    edges_json: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 # ── Interrogation models ─────────────────────────────────────────────
 
 class InterrogationSession(BaseModel):

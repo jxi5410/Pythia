@@ -28,6 +28,7 @@ from src.core.models import (
     GraphEdge,
     GraphEntityType,
     GraphNode,
+    GraphSnapshot,
     InterrogationMessage,
     InterrogationRole,
     InterrogationSession,
@@ -228,6 +229,19 @@ CREATE TABLE IF NOT EXISTS governance_events (
 );
 CREATE INDEX IF NOT EXISTS idx_governance_events_run
     ON governance_events (run_id);
+
+CREATE TABLE IF NOT EXISTS graph_snapshots (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    node_count INTEGER NOT NULL DEFAULT 0,
+    edge_count INTEGER NOT NULL DEFAULT 0,
+    delta_sequence_at INTEGER NOT NULL DEFAULT 0,
+    nodes_json TEXT NOT NULL DEFAULT '{}',
+    edges_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_graph_snapshots_run
+    ON graph_snapshots (run_id);
 
 CREATE TABLE IF NOT EXISTS run_checkpoints (
     id TEXT PRIMARY KEY,
@@ -881,6 +895,74 @@ class RunRepository:
             properties=_parse_json(row["properties"]),
             created_at_sequence=row["created_at_sequence"],
         )
+
+    # ── Graph snapshots ────────────────────────────────────────────
+
+    def save_graph_snapshot(self, snapshot: GraphSnapshot) -> None:
+        self._conn.execute(
+            """INSERT INTO graph_snapshots
+               (id, run_id, node_count, edge_count, delta_sequence_at,
+                nodes_json, edges_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                _str(snapshot.id), _str(snapshot.run_id),
+                snapshot.node_count, snapshot.edge_count,
+                snapshot.delta_sequence_at,
+                _json(snapshot.nodes_json), _json(snapshot.edges_json),
+                _iso(snapshot.created_at),
+            ),
+        )
+        self._conn.commit()
+
+    def get_latest_graph_snapshot(self, run_id: str) -> GraphSnapshot | None:
+        row = self._conn.execute(
+            """SELECT * FROM graph_snapshots
+               WHERE run_id = ?
+               ORDER BY delta_sequence_at DESC LIMIT 1""",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_graph_snapshot(row)
+
+    @staticmethod
+    def _row_to_graph_snapshot(row: sqlite3.Row) -> GraphSnapshot:
+        return GraphSnapshot(
+            id=UUID(row["id"]),
+            run_id=UUID(row["run_id"]),
+            node_count=row["node_count"],
+            edge_count=row["edge_count"],
+            delta_sequence_at=row["delta_sequence_at"],
+            nodes_json=_parse_json(row["nodes_json"]),
+            edges_json=_parse_json(row["edges_json"]),
+            created_at=_parse_dt(row["created_at"]),
+        )
+
+    # ── SSE events filtered by type ──────────────────────────────────
+
+    def get_sse_events_filtered(
+        self,
+        run_id: str,
+        after_sequence: int = -1,
+        event_types: list[str] | None = None,
+    ) -> list[SSEEvent]:
+        if event_types:
+            placeholders = ",".join("?" for _ in event_types)
+            rows = self._conn.execute(
+                f"""SELECT * FROM sse_events
+                    WHERE run_id = ? AND sequence > ?
+                      AND event_type IN ({placeholders})
+                    ORDER BY sequence""",
+                (run_id, after_sequence, *event_types),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT * FROM sse_events
+                   WHERE run_id = ? AND sequence > ?
+                   ORDER BY sequence""",
+                (run_id, after_sequence),
+            ).fetchall()
+        return [self._row_to_sse_event(r) for r in rows]
 
     # ── Interrogation sessions & messages ────────────────────────────
 

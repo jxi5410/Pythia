@@ -560,17 +560,32 @@ async def stream_run(run_id: str, request: Request):
 # ─── GET /api/runs/{run_id}/replay — full replay from DB ─────────────
 
 @app.get("/api/runs/{run_id}/replay")
-async def replay_run(run_id: str, after_sequence: int = Query(-1)):
-    """Return all persisted SSE events for a run as JSON array."""
+async def replay_run(
+    run_id: str,
+    after_sequence: int = Query(-1),
+    event_types: str = Query(None, description="Comma-separated event types to filter"),
+):
+    """Return all persisted SSE events for a run as JSON array.
+
+    Deterministic: same run_id always produces identical event sequence
+    from stored artifacts. No LLM re-execution.
+
+    Supports filtering by event_types (comma-separated):
+        ?event_types=agent_action,graph_delta
+    """
     repo = _get_repo()
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    events = repo.get_sse_events(run_id, after_sequence=after_sequence)
+    type_list = [t.strip() for t in event_types.split(",")] if event_types else None
+    events = repo.get_sse_events_filtered(
+        run_id, after_sequence=after_sequence, event_types=type_list,
+    )
     return {
         "run_id": run_id,
         "status": run.status.value,
+        "event_count": len(events),
         "events": [
             {
                 "event_id": str(e.event_id),
@@ -583,6 +598,56 @@ async def replay_run(run_id: str, after_sequence: int = Query(-1)):
             }
             for e in events
         ],
+    }
+
+
+# ─── GET /api/runs/{run_id}/graph — reconstructed graph ──────────────
+
+_graph_manager = None
+
+def _get_graph_manager():
+    global _graph_manager
+    if _graph_manager is None:
+        from src.core.graph_manager import GraphManager
+        _graph_manager = GraphManager(db=_get_repo())
+    return _graph_manager
+
+
+@app.get("/api/runs/{run_id}/graph")
+async def get_run_graph(run_id: str):
+    """Return the full reconstructed graph (nodes + edges) for a run."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    gm = _get_graph_manager()
+    graph = gm.get_run_graph(run_id)
+    return {
+        "run_id": run_id,
+        "node_count": len(graph["nodes"]),
+        "edge_count": len(graph["edges"]),
+        **graph,
+    }
+
+
+@app.get("/api/runs/{run_id}/graph/deltas")
+async def get_run_graph_deltas(
+    run_id: str,
+    after_sequence: int = Query(0),
+):
+    """Return raw graph deltas in sequence order."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    gm = _get_graph_manager()
+    deltas = gm.get_deltas(run_id, after_sequence=after_sequence)
+    return {
+        "run_id": run_id,
+        "delta_count": len(deltas),
+        "deltas": [d.model_dump(mode="json") for d in deltas],
     }
 
 

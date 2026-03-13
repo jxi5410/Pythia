@@ -275,9 +275,11 @@ class RunOrchestrator:
         self._bace_depth = bace_depth
         # Lazy import to avoid circular dependency at module level
         from src.core.evidence_ledger import EvidenceLedger
+        from src.core.graph_manager import GraphManager
         from src.core.scenario_engine import ScenarioEngine
         self._ledger = EvidenceLedger(db)
         self._scenario_engine = ScenarioEngine(db)
+        self._graph_manager = GraphManager(db)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -437,12 +439,12 @@ class RunOrchestrator:
                     )
 
                 elif step == "ontology":
-                    # Persist graph nodes/edges/deltas
-                    nodes, edges, deltas = _ontology_to_graph_models(
-                        run_id, data, graph_delta_seq,
+                    # Persist graph nodes/edges/deltas via GraphManager
+                    nodes, edges, deltas = (
+                        self._graph_manager.record_ontology(
+                            run_id, data, graph_delta_seq,
+                        )
                     )
-                    for delta in deltas:
-                        self._db.save_graph_delta(delta)
                     graph_delta_seq += len(deltas)
 
                     await self._emit(
