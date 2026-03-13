@@ -50,6 +50,8 @@ def repo():
 def client(repo, monkeypatch):
     import src.api.server as server_mod
 
+    monkeypatch.setenv("PYTHIA_TESTING", "1")
+
     mock_llm_fn = MagicMock(return_value="mock response")
 
     def fake_get_repo():

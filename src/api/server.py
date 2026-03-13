@@ -34,6 +34,7 @@ Endpoints:
 """
 
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -45,8 +46,9 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.core.models import (
     AnswerMode,
@@ -81,6 +83,53 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─── Rate limiting ───────────────────────────────────────────────────
+
+RATE_LIMIT_RPM = int(os.environ.get("PYTHIA_RATE_LIMIT_RPM", "60"))
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple sliding-window rate limiter: RATE_LIMIT_RPM requests per minute per IP."""
+
+    def __init__(self, app: FastAPI, rpm: int = 60):
+        super().__init__(app)
+        self.rpm = rpm
+        self.window = 60.0  # seconds
+        self._hits: Dict[str, collections.deque] = {}
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip health checks and SSE streams (long-lived connections)
+        if request.url.path in ("/health", "/health/llm"):
+            return await call_next(request)
+
+        # Skip rate limiting in test mode
+        if os.environ.get("PYTHIA_TESTING") == "1":
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+
+        if client_ip not in self._hits:
+            self._hits[client_ip] = collections.deque()
+
+        q = self._hits[client_ip]
+        # Evict timestamps outside the window
+        while q and q[0] < now - self.window:
+            q.popleft()
+
+        if len(q) >= self.rpm:
+            retry_after = int(self.window - (now - q[0])) + 1
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."},
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        q.append(now)
+        return await call_next(request)
+
+app.add_middleware(RateLimitMiddleware, rpm=RATE_LIMIT_RPM)
 
 
 # ─── SSE formatting ──────────────────────────────────────────────────
