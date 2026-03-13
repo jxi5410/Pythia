@@ -354,8 +354,12 @@ async def attribute_spike_streaming(
     ontology_task = asyncio.ensure_future(_run_in_thread(extract_causal_ontology, context, ontology_llm))
     early_ev_task = asyncio.ensure_future(early_evidence())
 
-    # Wait for ontology (the bottleneck)
-    ontology = await ontology_task
+    # Wait for ontology with keepalive heartbeats (prevents SSE timeout)
+    while not ontology_task.done():
+        await asyncio.sleep(8)
+        if not ontology_task.done():
+            yield {"step": "heartbeat", "data": {"status": "extracting_ontology", "elapsed": round(time.time() - start_time, 1)}}
+    ontology = ontology_task.result()
 
     yield {"step": "ontology", "data": {
         "entity_count": len(ontology.entities),
@@ -365,7 +369,12 @@ async def attribute_spike_streaming(
     }}
 
     # Now do the full evidence search with ontology terms
-    full_evidence = await gather_evidence_parallel(ontology, context)
+    ev_task = asyncio.ensure_future(gather_evidence_parallel(ontology, context))
+    while not ev_task.done():
+        await asyncio.sleep(8)
+        if not ev_task.done():
+            yield {"step": "heartbeat", "data": {"status": "gathering_evidence", "elapsed": round(time.time() - start_time, 1)}}
+    full_evidence = ev_task.result()
 
     # Merge early evidence with full evidence (deduplicate)
     early_ev = await early_ev_task
@@ -401,7 +410,12 @@ async def attribute_spike_streaming(
     yield {"step": "domain_evidence", "data": {"count": n_domain}}
 
     # Step 5: Proposals (PARALLEL)
-    hypotheses = await run_proposals_parallel(agents, context, ontology, evidence, llm_fast, agent_evidence)
+    prop_task = asyncio.ensure_future(run_proposals_parallel(agents, context, ontology, evidence, llm_fast, agent_evidence))
+    while not prop_task.done():
+        await asyncio.sleep(8)
+        if not prop_task.done():
+            yield {"step": "heartbeat", "data": {"status": "generating_proposals", "elapsed": round(time.time() - start_time, 1)}}
+    hypotheses = prop_task.result()
 
     # Yield each agent's proposals
     by_agent = {}

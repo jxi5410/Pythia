@@ -225,6 +225,8 @@ export async function runBACEStream(
         finalResult = data;
       } else if (eventType === 'done') {
         // stream complete
+      } else if (eventType === 'heartbeat') {
+        // keepalive — no UI update needed, just prevents connection timeout
       } else if (eventType === 'error') {
         callbacks.onError(data.error || 'Backend error');
         return;
