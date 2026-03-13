@@ -378,6 +378,51 @@ async def get_evidence_item(evidence_id: str):
     return item.model_dump(mode="json")
 
 
+# ─── Scenario endpoints ───────────────────────────────────────────────
+
+@app.get("/api/runs/{run_id}/scenarios")
+async def get_run_scenarios(run_id: str):
+    """All scenarios for a run."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    scenarios = repo.get_scenarios(run_id)
+    return {
+        "run_id": run_id,
+        "scenarios": [s.model_dump(mode="json") for s in scenarios],
+    }
+
+
+@app.get("/api/scenarios/{scenario_id}")
+async def get_scenario_detail(scenario_id: str):
+    """Single scenario with evidence chain and revision history."""
+    repo = _get_repo()
+    scenario = repo.get_scenario_by_id(scenario_id)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    revisions = repo.get_scenario_revisions(scenario_id)
+    links = repo.get_evidence_links_by_scenario(scenario_id)
+
+    evidence_items = []
+    for link in links:
+        ev = repo.get_evidence_by_id(str(link.evidence_id))
+        if ev:
+            evidence_items.append({
+                "evidence": ev.model_dump(mode="json"),
+                "link_type": link.link_type.value,
+                "agent_name": link.agent_name,
+            })
+
+    return {
+        "scenario": scenario.model_dump(mode="json"),
+        "revisions": [r.model_dump(mode="json") for r in revisions],
+        "evidence_chain": evidence_items,
+    }
+
+
 # ─── GET /api/runs/{run_id}/stream — SSE with reconnect ──────────────
 
 @app.get("/api/runs/{run_id}/stream")

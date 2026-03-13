@@ -560,7 +560,58 @@ class RunRepository:
             metadata=_parse_json(row["metadata"]),
         )
 
+    def get_scenario_by_id(self, scenario_id: str) -> Scenario | None:
+        row = self._conn.execute(
+            "SELECT * FROM scenarios WHERE id = ?", (scenario_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_scenario(row)
+
+    def update_scenario(self, scenario: Scenario) -> None:
+        self._conn.execute(
+            """UPDATE scenarios
+               SET title = ?, mechanism_type = ?, summary = ?,
+                   confidence_score = ?, status = ?,
+                   lead_agents = ?, supporting_agents = ?,
+                   challenging_agents = ?, what_breaks_this = ?,
+                   temporal_fit = ?, unresolved_questions = ?,
+                   updated_at = ?, metadata = ?
+               WHERE id = ?""",
+            (
+                scenario.title, scenario.mechanism_type, scenario.summary,
+                scenario.confidence_score, scenario.status.value,
+                _json(scenario.lead_agents), _json(scenario.supporting_agents),
+                _json(scenario.challenging_agents), _json(scenario.what_breaks_this),
+                scenario.temporal_fit, _json(scenario.unresolved_questions),
+                _iso(scenario.updated_at), _json(scenario.metadata),
+                _str(scenario.id),
+            ),
+        )
+        self._conn.commit()
+
     # ── Scenario revisions ────────────────────────────────────────
+
+    def get_scenario_revisions(self, scenario_id: str) -> list[ScenarioRevision]:
+        rows = self._conn.execute(
+            """SELECT * FROM scenario_revisions
+               WHERE scenario_id = ? ORDER BY timestamp""",
+            (scenario_id,),
+        ).fetchall()
+        return [
+            ScenarioRevision(
+                id=UUID(r["id"]),
+                scenario_id=UUID(r["scenario_id"]),
+                run_id=UUID(r["run_id"]),
+                revision_type=ScenarioRevisionType(r["revision_type"]),
+                previous_confidence=r["previous_confidence"],
+                new_confidence=r["new_confidence"],
+                reason=r["reason"],
+                triggering_action_id=_parse_uuid(r["triggering_action_id"]),
+                timestamp=_parse_dt(r["timestamp"]),
+            )
+            for r in rows
+        ]
 
     def save_scenario_revision(self, revision: ScenarioRevision) -> None:
         self._conn.execute(

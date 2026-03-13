@@ -275,7 +275,9 @@ class RunOrchestrator:
         self._bace_depth = bace_depth
         # Lazy import to avoid circular dependency at module level
         from src.core.evidence_ledger import EvidenceLedger
+        from src.core.scenario_engine import ScenarioEngine
         self._ledger = EvidenceLedger(db)
+        self._scenario_engine = ScenarioEngine(db)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -525,6 +527,31 @@ class RunOrchestrator:
                         SSEEventType.CHECKPOINT_SAVED, seq,
                         {"stage": "attribution_streaming"},
                     )
+
+                    # Cluster persisted actions into formal Scenario
+                    # objects via the ScenarioEngine.
+                    try:
+                        db_actions = self._db.get_actions(run_id_str)
+                        db_evidence = self._db.get_evidence(run_id_str)
+                        if db_actions:
+                            engine_scenarios = (
+                                self._scenario_engine.cluster_from_actions(
+                                    run_id, db_actions, db_evidence,
+                                )
+                            )
+                            for esc in engine_scenarios:
+                                await self._emit(
+                                    on_event, run_id,
+                                    "scenario_clustering_complete",
+                                    SSEEventType.SCENARIO_CREATED, seq,
+                                    {"title": esc.title,
+                                     "tier": esc.status.value,
+                                     "source": "scenario_engine"},
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            "ScenarioEngine clustering failed: %s", e,
+                        )
 
                 elif step == "interaction":
                     await self._emit(
