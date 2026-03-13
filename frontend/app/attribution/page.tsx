@@ -108,15 +108,13 @@ export default function AttributionPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [started, run.selectedSpike, run.selectedMarket, run.attribution]);
 
-  // Auto-navigate to scenarios when complete
-  const hasNavigated = useRef(false);
+  // Show continue button when complete — no forced auto-navigate
+  const [showContinue, setShowContinue] = useState(false);
   useEffect(() => {
-    if (run.attribution && !run.isRunning && !hasNavigated.current) {
-      hasNavigated.current = true;
-      // Brief pause so user sees completion
-      setTimeout(() => router.push('/scenarios'), 800);
+    if (run.attribution && !run.isRunning) {
+      setShowContinue(true);
     }
-  }, [run.attribution, run.isRunning, router]);
+  }, [run.attribution, run.isRunning]);
 
   if (!run.selectedSpike || !run.selectedMarket) return null;
 
@@ -144,10 +142,26 @@ export default function AttributionPage() {
           <BACEGraphAnimation baceState={run.baceState} graphState={run.graphState} />
         </div>
 
-        {/* Completion indicator */}
-        {run.attribution && !run.isRunning && (
-          <div style={{ textAlign: 'center' as const, padding: '20px 0', fontFamily: mono, fontSize: 12, color: C.yes }}>
-            ✓ Attribution complete — loading scenarios…
+        {/* Continue button when complete */}
+        {showContinue && (
+          <div style={{ textAlign: 'center' as const, padding: '28px 0' }}>
+            <div style={{ fontFamily: mono, fontSize: 12, color: C.yes, marginBottom: 12 }}>
+              ✓ Attribution complete — {run.attribution?.scenarios?.length || 0} scenarios identified
+            </div>
+            <button
+              onClick={() => router.push('/scenarios')}
+              style={{
+                padding: '14px 40px', borderRadius: 6, border: 'none',
+                background: C.dark, color: C.bg, fontFamily: mono,
+                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              View Scenarios →
+            </button>
+            <div style={{ fontFamily: mono, fontSize: 10, color: C.muted, marginTop: 8 }}>
+              {run.isLive ? '● Live attribution from backend' : '⚠ Simulated — backend not connected'}
+            </div>
           </div>
         )}
       </div>

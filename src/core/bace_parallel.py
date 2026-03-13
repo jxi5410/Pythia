@@ -381,8 +381,9 @@ async def attribute_spike_streaming(
     # Agents autonomously debate over N rounds, each action logged and streamed
     interaction_data = None
     sim_rounds = 3 if depth >= 2 else 1
+    sim_actions_log = []  # Collect all actions for interrogation context
     try:
-        from .bace_simulation import run_agent_simulation, simulation_to_interaction_round
+        from .bace_simulation import run_agent_simulation
 
         async for sim_event in run_agent_simulation(
             agents, hypotheses, context, llm_fast,
@@ -391,22 +392,40 @@ async def attribute_spike_streaming(
         ):
             yield {"step": sim_event["step"], "data": sim_event["data"]}
 
-            # Capture the final state for scenario clustering
-            if sim_event["step"] == "sim_complete":
-                # Build backward-compatible interaction data from simulation
-                from .bace_simulation import SimulationState
-                # We need to reconstruct — the generator doesn't return the state object
-                # Instead, use the action data accumulated in the sim_complete event
-                pass
+            # Accumulate actions for the result
+            if sim_event["step"] == "sim_action":
+                sim_actions_log.append(sim_event["data"])
 
-        # After simulation, build interaction_data for scenario clustering
-        # Re-derive from hypotheses (which were mutated during simulation)
-        from .bace_interaction import InteractionRound
+        # Build backward-compatible interaction_data from accumulated actions
+        from .bace_interaction import InteractionRound, InteractionResponse
         interaction_data = InteractionRound(round_number=sim_rounds)
+        for act in sim_actions_log:
+            if act.get("action") in ("SUPPORT", "CHALLENGE", "CONCEDE"):
+                stance = "support" if act["action"] == "SUPPORT" else "challenge"
+                interaction_data.responses.append(InteractionResponse(
+                    responder_id=act.get("agent", ""),
+                    responder_name=act.get("agent_name", ""),
+                    target_hypothesis_id=act.get("target_hyp", ""),
+                    target_agent_id=act.get("target_agent", ""),
+                    stance=stance,
+                    reasoning=act.get("content", ""),
+                    confidence_shift=-0.04 if stance == "challenge" else 0.03,
+                ))
+
+        # Derive convergence/divergence from actions
+        from .bace_simulation import _derive_convergence, _derive_divergence, SimulationState
+        temp_state = SimulationState(total_rounds=sim_rounds)
+        temp_state.agent_stance_map = {}
+        for act in sim_actions_log:
+            agent = act.get("agent", "")
+            if act.get("action") == "SUPPORT":
+                temp_state.agent_stance_map.setdefault(agent, {})[act.get("target_hyp", "")] = "support"
+            elif act.get("action") == "CHALLENGE":
+                temp_state.agent_stance_map.setdefault(agent, {})[act.get("target_hyp", "")] = "challenge"
+        interaction_data.convergence_groups = _derive_convergence(temp_state, hypotheses, agents)
 
     except Exception as e:
         logger.warning("Agent simulation failed, falling back to single-pass: %s", e)
-        # Fallback: original single-pass interaction
         try:
             from .bace_interaction import run_interaction_round, interaction_round_to_sse
             interaction_data = await run_interaction_round(
@@ -458,7 +477,7 @@ async def attribute_spike_streaming(
         "method": "bace_parallel",
         "agents_spawned": len(agents),
         "total_hypotheses": len(hypotheses),
-        "debate_rounds": debate_rounds,
+        "debate_rounds": sim_rounds,
         "evidence_gathered": n_evidence,
         "elapsed_seconds": round(elapsed, 1),
         "agent_hypotheses": [
@@ -486,6 +505,7 @@ async def attribute_spike_streaming(
             for h in sorted(hypotheses, key=lambda x: x.confidence, reverse=True)
         ],
         "scenarios": [s.to_dict() for s in scenarios],
+        "simulation_actions": sim_actions_log,  # Full action log for interrogation
         "interaction": {
             "rounds": sim_rounds,
             "responses": len(interaction_data.responses) if interaction_data else 0,
@@ -500,7 +520,7 @@ async def attribute_spike_streaming(
         "bace_metadata": {
             "agents_spawned": len(agents),
             "hypotheses_proposed": len(hypotheses),
-            "debate_rounds": debate_rounds,
+            "debate_rounds": sim_rounds,
             "interaction_rounds": sim_rounds,
             "scenario_count": len(scenarios),
             "elapsed_seconds": round(elapsed, 1),

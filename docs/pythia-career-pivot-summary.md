@@ -12,21 +12,22 @@ Built by XJ (Jie Xi) and cofounder Bangshan. Two-person team augmented by AI age
 
 ### BACE — Backward Attribution Causal Engine
 
-The core differentiator. A multi-agent causal attribution system that:
+The core differentiator. A multi-agent simulation system for causal attribution:
 
 1. **Detects spikes** — Monitors prediction markets for ≥5% moves, 3x volume anomalies, liquidity edge, momentum breakouts
 2. **Builds a causal ontology** — Entity-relationship graph extraction (People, Organizations, Policies, Data Releases, Markets, Geopolitical Events) with typed relationships (triggers, correlates_with, announced, contradicts)
 3. **Spawns specialist agents** — 9 domain-specific AI agents (Macro Policy, Informed Flow, Narrative/Sentiment, Cross-Market, Geopolitical, Regulatory, Technical Microstructure, Devil's Advocate, Null Hypothesis)
-4. **Runs adversarial cross-examination** — Agents respond to each other's hypotheses (support, challenge, subsume, neutral). Convergence groups and divergence pairs form organically.
-5. **Clusters into competing scenarios** — Hypotheses grouped by causal mechanism into Primary, Alternative, and Dismissed scenarios. Each scenario has: confidence score, lead + supporting agents, evidence chain, causal narrative, "what breaks this scenario", and temporal fit analysis.
+4. **Multi-round adversarial simulation** — Agents autonomously act over 3 rounds. Actions: PROPOSE, SUPPORT, CHALLENGE, REBUT, UPDATE_CONFIDENCE, PRESENT_EVIDENCE, CONCEDE, SYNTHESIZE. Agents *must* rebut challenges or concede. Confidence evolves from agent behavior, not self-assessment. Early termination when consensus reached (no challenges in a round). Every action logged to JSONL and streamed as individual SSE events.
+5. **Clusters into competing scenarios** — Convergence/divergence patterns derived from action log (not single-pass labels). Hypotheses grouped by causal mechanism into Primary, Alternative, and Dismissed scenarios. Each scenario has: confidence score, lead + supporting agents, evidence chain, causal narrative, "what breaks this scenario", and temporal fit analysis.
 6. **Persists to graph memory** — GraphRAG-style entity/relationship/fact storage for cross-attribution intelligence accumulation.
 
-### Frontend — Interactive Intelligence Dashboard
+### Frontend — Staged Intelligence Dashboard
 
-- **TypeScript/Next.js** single-page app on Vercel
+- **4-stage workflow** — Market Selection → Attribution → Scenarios → Interrogation, each with its own URL (shareable, resumable)
 - **Force-directed knowledge graph** — Entities and agents appear organically as SSE streams them; convergence/divergence visualized as clustering/conflict edges
-- **Scenario tabs** — Primary scenarios as tabs with full evidence chains; alternatives expandable; dismissed with rejection reasoning
-- **Post-result interrogation** — Chat interface for follow-up questions ("why did Devil's Advocate disagree?", "what evidence would change Scenario B?")
+- **Real-time action feed** — Each agent action (CHALLENGE, REBUT, SUPPORT, CONCEDE) streams live during the simulation with confidence deltas
+- **Scenario view** — Primary scenarios with full evidence chains; alternatives expandable; dismissed with rejection reasoning
+- **Agent interview mode** — Select a specific agent and interrogate it in-character about its analysis, evidence, and reasoning
 - **Real SSE streaming** — All visualization mirrors actual backend state, not decorative animation
 
 ### Backend — FastAPI on Railway
@@ -42,11 +43,13 @@ The core differentiator. A multi-agent causal attribution system that:
 
 | Feature | What It Shows |
 |---|---|
-| Multi-agent causal reasoning | AI product design — not just calling an API |
-| Adversarial cross-examination | AI safety thinking — agents challenge each other |
+| Multi-round agent simulation | Agents autonomously debate — not scripted prompt-response |
+| Action-level logging + streaming | Every CHALLENGE, REBUT, CONCEDE logged and visible in real-time |
+| Confidence from behavior | Confidence evolves from debate actions, not self-assessment |
+| Adversarial architecture | Devil's Advocate + Null Hypothesis agents challenge everything |
 | Scenario-based output (not flat list) | Product sense — users need narratives, not rankings |
 | Force-directed knowledge graph | Real-time data visualization, not static mockups |
-| Post-result interrogation | AI UX innovation — users explore, not just consume |
+| Agent interview mode | Users interrogate specific agents in-character |
 | GraphRAG memory accumulation | System design — intelligence compounds across runs |
 | Governance layer (audit + circuit breakers) | Enterprise-grade thinking for institutional deployment |
 
@@ -71,11 +74,14 @@ The core differentiator. A multi-agent causal attribution system that:
 ## Technical Proof Points
 
 - **9 specialized agents** with domain-specific evidence providers (not generic LLM calls)
-- **~15 LLM calls/spike** at depth 2 with cost-conscious architecture (~$0.15/spike on Qwen)
+- **Multi-round simulation** — 3 rounds of autonomous agent debate with 8 action types
+- **~40-45 LLM calls/spike** at depth 2 (~$0.35/spike on Qwen) — genuine debate, not single-pass
+- **Action-level SSE streaming** — each agent action streams individually to frontend
 - **Real-time SSE streaming** with organic graph visualization
 - **SQLite → GraphRAG** memory for cross-attribution intelligence
 - **Paper trading engine** with EVT-aware Kelly sizing and risk controls
 - **Dual-exchange** support (Polymarket CLOB + Kalshi regulated contracts)
+- **Agent interview mode** — interrogate specific agents in-character post-attribution
 
 ---
 
