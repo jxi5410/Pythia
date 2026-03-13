@@ -20,6 +20,7 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -385,10 +386,20 @@ async def attribute_spike_streaming(
     try:
         from .bace_simulation import run_agent_simulation
 
+        # Build action log path
+        action_log_path = None
+        try:
+            data_dir = os.environ.get("PYTHIA_DATA_DIR", ".")
+            spike_id = getattr(spike, "id", 0) or int(time.time())
+            action_log_path = os.path.join(data_dir, "actions", f"run_{spike_id}.jsonl")
+        except Exception:
+            pass
+
         async for sim_event in run_agent_simulation(
             agents, hypotheses, context, llm_fast,
             num_rounds=sim_rounds,
             _run_in_thread=_run_in_thread,
+            action_log_path=action_log_path,
         ):
             yield {"step": sim_event["step"], "data": sim_event["data"]}
 

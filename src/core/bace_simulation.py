@@ -243,6 +243,7 @@ async def run_agent_simulation(
     llm_call: Callable,
     num_rounds: int = 3,
     _run_in_thread=None,
+    action_log_path: Optional[str] = None,
 ) -> AsyncGenerator[Dict, None]:
     """
     Run multi-round agent simulation.
@@ -271,6 +272,21 @@ async def run_agent_simulation(
 
     state.active_hypotheses = len([h for h in hypotheses if h.status != "debunked"])
 
+    # JSONL action log file
+    log_file = None
+    if action_log_path:
+        import os
+        os.makedirs(os.path.dirname(action_log_path) or ".", exist_ok=True)
+        log_file = open(action_log_path, "a")
+        logger.info("Action log: %s", action_log_path)
+
+    def log_action(action: SimAction):
+        """Append action to state and write to JSONL."""
+        state.actions.append(action)
+        if log_file:
+            log_file.write(json.dumps(action.to_dict(), default=str) + "\n")
+            log_file.flush()
+
     # Log initial proposals as round 0 actions
     for h in hypotheses:
         agent_name = next((a.name for a in agents if a.id == h.agent_id), h.agent_id)
@@ -281,7 +297,7 @@ async def run_agent_simulation(
             confidence_before=0.0, confidence_after=h.confidence,
             timestamp=time.time(),
         )
-        state.actions.append(action)
+        log_action(action)
 
     # === Simulation rounds ===
     for round_num in range(1, num_rounds + 1):
@@ -391,7 +407,7 @@ async def run_agent_simulation(
                         confidence_after=round(conf_after if action_type == "UPDATE_CONFIDENCE" else conf_before, 3),
                         timestamp=time.time(),
                     )
-                    state.actions.append(action)
+                    log_action(action)
 
                     # Emit each action as SSE event
                     yield {"step": "sim_action", "data": action.to_sse()}
@@ -445,6 +461,11 @@ async def run_agent_simulation(
     # Store results on the state for downstream use
     state.convergence_groups_result = convergence_groups
     state.divergence_pairs_result = divergence_pairs
+
+    # Close action log
+    if log_file:
+        log_file.close()
+        logger.info("Action log closed: %d actions written", len(state.actions))
 
 
 def _derive_convergence(state: SimulationState, hypotheses: List, agents: List) -> Dict[str, List[str]]:
