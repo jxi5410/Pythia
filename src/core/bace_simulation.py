@@ -341,6 +341,8 @@ async def run_agent_simulation(
                 prompt = _build_round_prompt(agent, spike_context, own_hyps, active_hyps, state.actions, round_num)
 
             try:
+                # Yield heartbeat before each LLM call to prevent SSE timeout
+                yield {"step": "heartbeat", "data": {"status": f"sim_round_{round_num}_{agent.id}", "agent": agent.name}}
                 response = await _run_in_thread(llm_call, prompt)
                 parsed = _parse_json_response(response)
 
