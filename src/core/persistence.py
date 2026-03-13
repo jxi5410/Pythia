@@ -293,9 +293,9 @@ def _parse_uuid_list(val: str | None) -> list[UUID]:
 
 # ── Init ──────────────────────────────────────────────────────────────
 
-def init_db(db_path: str) -> sqlite3.Connection:
+def init_db(db_path: str, check_same_thread: bool = True) -> sqlite3.Connection:
     """Create all tables if they don't exist. Uses WAL mode for concurrent reads."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
