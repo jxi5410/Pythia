@@ -25,9 +25,13 @@ from src.core.models import (
     GovernanceDecisionType,
     GraphDelta,
     GraphDeltaType,
+    GraphEdge,
     GraphEntityType,
-    InterrogationTargetType,
+    GraphNode,
+    InterrogationMessage,
     InterrogationRole,
+    InterrogationSession,
+    InterrogationTargetType,
     RunCheckpoint,
     RunStatus,
     SSEEvent,
@@ -766,3 +770,204 @@ class RunRepository:
             ),
         )
         self._conn.commit()
+
+    def get_governance_decisions(self, run_id: str) -> list[GovernanceDecision]:
+        rows = self._conn.execute(
+            "SELECT * FROM governance_events WHERE run_id = ? ORDER BY timestamp",
+            (run_id,),
+        ).fetchall()
+        return [self._row_to_governance_decision(r) for r in rows]
+
+    def get_governance_decision_by_id(self, decision_id: str) -> GovernanceDecision | None:
+        row = self._conn.execute(
+            "SELECT * FROM governance_events WHERE id = ?", (decision_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_governance_decision(row)
+
+    @staticmethod
+    def _row_to_governance_decision(row: sqlite3.Row) -> GovernanceDecision:
+        return GovernanceDecision(
+            id=UUID(row["id"]),
+            run_id=UUID(row["run_id"]),
+            decision_type=GovernanceDecisionType(row["decision_type"]),
+            stage=row["stage"],
+            input_context=_parse_json(row["input_context"]),
+            outcome=row["outcome"],
+            timestamp=_parse_dt(row["timestamp"]),
+        )
+
+    # ── Graph nodes & edges ──────────────────────────────────────────
+
+    def save_graph_node(self, node: GraphNode) -> None:
+        self._conn.execute(
+            """INSERT OR IGNORE INTO graph_nodes
+               (id, run_id, entity_type, label, properties, created_at_sequence)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                _str(node.id), _str(node.run_id), node.entity_type.value,
+                node.label, _json(node.properties), node.created_at_sequence,
+            ),
+        )
+        self._conn.commit()
+
+    def get_graph_nodes(self, run_id: str) -> list[GraphNode]:
+        rows = self._conn.execute(
+            "SELECT * FROM graph_nodes WHERE run_id = ? ORDER BY created_at_sequence",
+            (run_id,),
+        ).fetchall()
+        return [self._row_to_graph_node(r) for r in rows]
+
+    def get_graph_node_by_id(self, node_id: str) -> GraphNode | None:
+        row = self._conn.execute(
+            "SELECT * FROM graph_nodes WHERE id = ?", (node_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_graph_node(row)
+
+    @staticmethod
+    def _row_to_graph_node(row: sqlite3.Row) -> GraphNode:
+        return GraphNode(
+            id=UUID(row["id"]),
+            run_id=UUID(row["run_id"]),
+            entity_type=GraphEntityType(row["entity_type"]),
+            label=row["label"],
+            properties=_parse_json(row["properties"]),
+            created_at_sequence=row["created_at_sequence"],
+        )
+
+    def save_graph_edge(self, edge: GraphEdge) -> None:
+        self._conn.execute(
+            """INSERT OR IGNORE INTO graph_edges
+               (id, run_id, source_node_id, target_node_id,
+                relationship_type, weight, properties, created_at_sequence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                _str(edge.id), _str(edge.run_id),
+                _str(edge.source_node_id), _str(edge.target_node_id),
+                edge.relationship_type, edge.weight,
+                _json(edge.properties), edge.created_at_sequence,
+            ),
+        )
+        self._conn.commit()
+
+    def get_graph_edges(self, run_id: str) -> list[GraphEdge]:
+        rows = self._conn.execute(
+            "SELECT * FROM graph_edges WHERE run_id = ? ORDER BY created_at_sequence",
+            (run_id,),
+        ).fetchall()
+        return [self._row_to_graph_edge(r) for r in rows]
+
+    def get_graph_edges_by_node(self, node_id: str) -> list[GraphEdge]:
+        rows = self._conn.execute(
+            """SELECT * FROM graph_edges
+               WHERE source_node_id = ? OR target_node_id = ?
+               ORDER BY created_at_sequence""",
+            (node_id, node_id),
+        ).fetchall()
+        return [self._row_to_graph_edge(r) for r in rows]
+
+    @staticmethod
+    def _row_to_graph_edge(row: sqlite3.Row) -> GraphEdge:
+        return GraphEdge(
+            id=UUID(row["id"]),
+            run_id=UUID(row["run_id"]),
+            source_node_id=UUID(row["source_node_id"]),
+            target_node_id=UUID(row["target_node_id"]),
+            relationship_type=row["relationship_type"],
+            weight=row["weight"],
+            properties=_parse_json(row["properties"]),
+            created_at_sequence=row["created_at_sequence"],
+        )
+
+    # ── Interrogation sessions & messages ────────────────────────────
+
+    def save_interrogation_session(self, session: InterrogationSession) -> None:
+        self._conn.execute(
+            """INSERT INTO interrogation_sessions
+               (id, run_id, target_type, target_id, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                _str(session.id), _str(session.run_id),
+                session.target_type.value, _str(session.target_id),
+                _iso(session.created_at),
+            ),
+        )
+        self._conn.commit()
+
+    def get_interrogation_session(self, session_id: str) -> InterrogationSession | None:
+        row = self._conn.execute(
+            "SELECT * FROM interrogation_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_interrogation_session(row)
+
+    @staticmethod
+    def _row_to_interrogation_session(row: sqlite3.Row) -> InterrogationSession:
+        return InterrogationSession(
+            id=UUID(row["id"]),
+            run_id=UUID(row["run_id"]),
+            target_type=InterrogationTargetType(row["target_type"]),
+            target_id=UUID(row["target_id"]),
+            created_at=_parse_dt(row["created_at"]),
+        )
+
+    def save_interrogation_message(self, message: InterrogationMessage) -> None:
+        self._conn.execute(
+            """INSERT INTO interrogation_messages
+               (id, session_id, role, content, answer_mode,
+                referenced_artifact_ids, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                _str(message.id), _str(message.session_id),
+                message.role.value, message.content,
+                message.answer_mode.value,
+                _json(message.referenced_artifact_ids),
+                _iso(message.timestamp),
+            ),
+        )
+        self._conn.commit()
+
+    def get_interrogation_messages(self, session_id: str) -> list[InterrogationMessage]:
+        rows = self._conn.execute(
+            """SELECT * FROM interrogation_messages
+               WHERE session_id = ? ORDER BY timestamp""",
+            (session_id,),
+        ).fetchall()
+        return [self._row_to_interrogation_message(r) for r in rows]
+
+    @staticmethod
+    def _row_to_interrogation_message(row: sqlite3.Row) -> InterrogationMessage:
+        return InterrogationMessage(
+            id=UUID(row["id"]),
+            session_id=UUID(row["session_id"]),
+            role=InterrogationRole(row["role"]),
+            content=row["content"],
+            answer_mode=AnswerMode(row["answer_mode"]),
+            referenced_artifact_ids=_parse_uuid_list(row["referenced_artifact_ids"]),
+            timestamp=_parse_dt(row["timestamp"]),
+        )
+
+    # ── Evidence links by evidence ID (reverse lookup) ───────────────
+
+    def get_evidence_links_by_evidence(
+        self, evidence_id: str,
+    ) -> list[ScenarioEvidenceLink]:
+        rows = self._conn.execute(
+            "SELECT * FROM scenario_evidence_links WHERE evidence_id = ?",
+            (evidence_id,),
+        ).fetchall()
+        return [
+            ScenarioEvidenceLink(
+                id=UUID(r["id"]),
+                scenario_id=UUID(r["scenario_id"]),
+                evidence_id=UUID(r["evidence_id"]),
+                link_type=ScenarioEvidenceLinkType(r["link_type"]),
+                agent_name=r["agent_name"],
+                created_at=_parse_dt(r["created_at"]),
+            )
+            for r in rows
+        ]

@@ -36,6 +36,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.core.models import (
+    AnswerMode,
     RunStatus,
     SSEEvent,
     SSEEventType,
@@ -626,6 +627,79 @@ async def cancel_run(run_id: str):
 
     repo.update_run_status(run_id, RunStatus.CANCELLED)
     return {"run_id": run_id, "status": "cancelled"}
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Interrogation API (structured, DB-backed)
+# ══════════════════════════════════════════════════════════════════════
+
+_interrogation_engine = None
+
+def _get_interrogation_engine():
+    global _interrogation_engine
+    if _interrogation_engine is None:
+        from src.core.interrogation import InterrogationEngine
+        llm_fast, _ = _get_llm()
+        _interrogation_engine = InterrogationEngine(db=_get_repo(), llm_client=llm_fast)
+    return _interrogation_engine
+
+
+class CreateSessionRequest(BaseModel):
+    run_id: str
+    target_type: str
+    target_id: str
+
+
+class SendMessageRequest(BaseModel):
+    session_id: str
+    question: str
+    answer_mode: str = "concise"
+
+
+@app.post("/api/interrogation/session")
+async def create_interrogation_session(req: CreateSessionRequest):
+    """Create a new interrogation session targeting a specific artifact."""
+    repo = _get_repo()
+    run = repo.get_run(req.run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    try:
+        engine = _get_interrogation_engine()
+        session = engine.create_session(req.run_id, req.target_type, req.target_id)
+        return session.model_dump(mode="json")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/interrogation/message")
+async def send_interrogation_message(req: SendMessageRequest):
+    """Send a question to an interrogation session. Returns SSE stream."""
+    engine = _get_interrogation_engine()
+
+    # Eagerly validate session exists before starting stream
+    repo = _get_repo()
+    session = repo.get_interrogation_session(req.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{req.session_id}' not found")
+
+    stream = engine.ask(req.session_id, req.question, req.answer_mode)
+
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/interrogation/session/{session_id}")
+async def get_interrogation_session(session_id: str):
+    """Get an interrogation session with its full message transcript."""
+    engine = _get_interrogation_engine()
+    try:
+        return engine.get_session(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ══════════════════════════════════════════════════════════════════════
