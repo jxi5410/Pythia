@@ -47,6 +47,7 @@ export default function InterrogationChat({
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isOpen, setIsOpen] = useState(alwaysOpen);
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialSent = useRef(false);
@@ -102,7 +103,8 @@ export default function InterrogationChat({
           question: question.trim(),
           context: attributionContext,
           market_title: marketTitle,
-          history: conversationHistory.slice(-6), // Last 3 turns
+          history: conversationHistory.slice(-6),
+          agent_id: selectedAgent || undefined,
         }),
       });
 
@@ -222,19 +224,51 @@ export default function InterrogationChat({
         borderBottom: `1px solid ${C.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         background: C.faint,
+        flexWrap: 'wrap' as const,
+        gap: 8,
       }}>
         <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: C.dark }}>
-          💬 Interrogation
+          💬 {selectedAgent ? `Interviewing: ${selectedAgent}` : 'Interrogation'}
         </span>
-        <button
-          onClick={() => setIsOpen(false)}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontFamily: mono, fontSize: 14, color: C.muted, padding: '0 4px',
-          }}
-        >
-          ✕
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* Agent selector */}
+          {getAvailableAgents(attributionContext).length > 0 && (
+            <select
+              value={selectedAgent || ''}
+              onChange={(e) => {
+                setSelectedAgent(e.target.value || null);
+                if (e.target.value) {
+                  setMessages(prev => [...prev, {
+                    role: 'assistant' as const,
+                    content: `Now interviewing ${e.target.value}. Ask me anything about my analysis.`,
+                    timestamp: Date.now(),
+                  }]);
+                }
+              }}
+              style={{
+                fontFamily: mono, fontSize: 10, padding: '3px 8px',
+                border: `1px solid ${C.border}`, borderRadius: 4,
+                background: C.surface, color: C.dark, outline: 'none',
+              }}
+            >
+              <option value="">General (all agents)</option>
+              {getAvailableAgents(attributionContext).map((a: string) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          )}
+          {!alwaysOpen && (
+            <button
+              onClick={() => setIsOpen(false)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontFamily: mono, fontSize: 14, color: C.muted, padding: '0 4px',
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Messages */}
@@ -417,4 +451,14 @@ function generateLocalResponse(question: string, context: any): string {
 
   // Generic response
   return `Based on the attribution analysis (${hypotheses.length} hypotheses from ${context?.agentsSpawned || context?.agents_spawned || '?'} agents):\n\nThe analysis covered ${scenarios.length} scenarios across mechanisms including ${scenarios.map((s: any) => s.mechanism).filter(Boolean).join(', ') || 'multiple categories'}.\n\nFor more detailed analysis, ensure the backend is running at ${process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000'} — I'll be able to provide richer, LLM-powered answers.`;
+}
+
+function getAvailableAgents(context: any): string[] {
+  const hypotheses = context?.hypotheses || context?.agent_hypotheses || [];
+  const agents = new Set<string>();
+  for (const h of hypotheses) {
+    const name = h.agent || h.agent_name;
+    if (name && name !== 'Unknown') agents.add(name);
+  }
+  return Array.from(agents);
 }

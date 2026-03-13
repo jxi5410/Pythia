@@ -369,3 +369,168 @@ def _extract_hypotheses(result: Dict) -> List[HypothesisOut]:
 
     hypotheses.sort(key=lambda h: h.confidence, reverse=True)
     return hypotheses
+
+
+# ─── Interrogation Chat (post-attribution follow-up) ──────────────────
+
+class InterrogateRequest(BaseModel):
+    question: str
+    context: Dict = {}
+    market_title: str = ""
+    history: List[Dict] = []
+    agent_id: Optional[str] = None  # If set, interview a specific agent
+
+
+@app.post("/api/interrogate")
+async def interrogate(req: InterrogateRequest):
+    """
+    Post-attribution interrogation — SSE streaming response.
+    
+    If agent_id is set, the LLM responds in-character as that agent
+    using its actual evidence and reasoning from the attribution run.
+    """
+    try:
+        llm_fast, llm_strong = _get_llm()
+    except Exception as e:
+        return StreamingResponse(
+            _error_stream(f"LLM not available: {e}"),
+            media_type="text/event-stream",
+        )
+
+    # Build system prompt
+    if req.agent_id:
+        system = _build_agent_interview_prompt(req.agent_id, req.context, req.market_title)
+    else:
+        system = _build_interrogation_prompt(req.context, req.market_title)
+
+    # Build conversation
+    messages = []
+    for msg in req.history[-6:]:
+        messages.append(f"{msg.get('role', 'user').upper()}: {msg.get('content', '')}")
+    messages.append(f"USER: {req.question}")
+
+    full_prompt = f"{system}\n\nCONVERSATION:\n" + "\n".join(messages) + "\n\nASSISTANT:"
+
+    async def generate():
+        try:
+            # Use llm_fast for speed
+            import asyncio
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, llm_fast, full_prompt)
+            
+            # Stream in chunks to give the feel of streaming
+            chunk_size = 40
+            for i in range(0, len(response), chunk_size):
+                chunk = response[i:i + chunk_size]
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+                await asyncio.sleep(0.02)
+            
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _build_interrogation_prompt(context: Dict, market_title: str) -> str:
+    """Build system prompt for general interrogation about the attribution."""
+    # Extract key info from context
+    scenarios = context.get("scenarios", [])
+    hypotheses = context.get("agent_hypotheses", context.get("hypotheses", []))
+    interaction = context.get("interaction", {})
+    
+    scenarios_text = ""
+    for s in scenarios[:5]:
+        label = s.get("label", "")
+        conf = s.get("confidence", 0)
+        lead = s.get("lead_agent", "")
+        scenarios_text += f"\n  - {label} ({conf:.0%}) led by {lead}"
+    
+    hyps_text = ""
+    for h in hypotheses[:8]:
+        agent = h.get("agent", h.get("agent_name", ""))
+        cause = h.get("cause", h.get("hypothesis", ""))[:100]
+        conf = h.get("confidence", h.get("confidence_score", 0))
+        status = h.get("status", "")
+        hyps_text += f"\n  - [{agent}] {cause} ({conf:.0%}) [{status}]"
+    
+    return f"""You are Pythia's attribution analyst. You just completed a BACE analysis.
+
+MARKET: {market_title}
+SCENARIOS: {scenarios_text or 'None available'}
+HYPOTHESES: {hyps_text or 'None available'}
+INTERACTION: {interaction.get('rounds', 0)} rounds, {interaction.get('responses', 0)} responses
+
+Answer the user's question based on this attribution data. Be specific:
+- Cite specific agents and their evidence
+- Reference confidence levels and how they changed
+- Explain why scenarios were ranked the way they are
+- Be honest about uncertainty and gaps in the analysis
+- Keep answers concise but substantive (2-4 paragraphs max)"""
+
+
+def _build_agent_interview_prompt(agent_id: str, context: Dict, market_title: str) -> str:
+    """Build system prompt for in-character agent interview."""
+    hypotheses = context.get("agent_hypotheses", context.get("hypotheses", []))
+    
+    # Find this agent's hypotheses
+    agent_hyps = [h for h in hypotheses if h.get("agent", "") == agent_id or h.get("agent_name", "") == agent_id]
+    agent_name = agent_hyps[0].get("agent_name", agent_hyps[0].get("agent", agent_id)) if agent_hyps else agent_id
+    
+    hyps_text = ""
+    for h in agent_hyps:
+        cause = h.get("cause", h.get("hypothesis", ""))
+        conf = h.get("confidence", 0)
+        reasoning = h.get("reasoning", h.get("causal_chain", ""))[:200]
+        evidence = h.get("evidence", [])
+        ev_text = ", ".join(e.get("title", str(e))[:50] for e in evidence[:3]) if evidence else "none cited"
+        status = h.get("status", "unknown")
+        hyps_text += f"\n  Hypothesis: {cause}\n  Confidence: {conf:.0%} (final, post-debate)\n  Status: {status}\n  Reasoning: {reasoning}\n  Evidence: {ev_text}\n"
+    
+    # Extract simulation actions involving this agent
+    sim_actions = context.get("simulation_actions", [])
+    agent_actions = [a for a in sim_actions if a.get("agent_id") == agent_id or a.get("agent") == agent_id]
+    
+    actions_text = ""
+    if agent_actions:
+        for a in agent_actions[-10:]:
+            actions_text += f"\n  Round {a.get('round', '?')}: {a.get('action_type', a.get('action', '?'))} → {a.get('target_hypothesis_id', a.get('target_hyp', 'general'))}"
+            if a.get('content'):
+                actions_text += f"\n    {a['content'][:120]}"
+    
+    # Find challenges this agent received
+    challenges_received = [a for a in sim_actions
+                           if a.get("action_type", a.get("action", "")) == "CHALLENGE"
+                           and a.get("target_agent_id", a.get("target_agent", "")) == agent_id]
+    challenges_text = ""
+    if challenges_received:
+        for c in challenges_received[-5:]:
+            challenger = c.get("agent_name", c.get("agent", "unknown"))
+            challenges_text += f"\n  [{challenger}]: {c.get('content', '')[:100]}"
+    
+    return f"""You ARE {agent_name}. Respond in first person as this specialist.
+
+MARKET: {market_title}
+
+YOUR ANALYSIS:
+{hyps_text or '  (You did not propose hypotheses in this run)'}
+
+YOUR DEBATE ACTIONS:
+{actions_text or '  (No actions recorded)'}
+
+CHALLENGES YOU RECEIVED:
+{challenges_text or '  (None)'}
+
+You are being interviewed about your analysis. Stay in character:
+- Defend your hypotheses with specific evidence from your domain
+- Reference specific debate actions you took (supports, challenges, rebuttals)
+- Acknowledge valid criticisms honestly — if you conceded, explain why
+- Explain how your confidence changed during the debate and why
+- If asked about other agents' views, give your professional assessment
+- Be direct and opinionated — you're a domain specialist, not a diplomat
+- Keep answers focused (2-3 paragraphs max)"""
+
+
+async def _error_stream(msg: str):
+    yield f"data: {json.dumps({'error': msg})}\n\n"

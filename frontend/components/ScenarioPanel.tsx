@@ -106,73 +106,49 @@ export default function ScenarioPanel({ attribution, isLive, onAskQuestion }: Sc
   const activeScenario = scenarios.find(s => s.id === activeTab);
 
   return (
-    <div style={{ padding: '24px 0' }}>
-      {/* Run metadata bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' as const }}>
-        <span style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
-          Depth {attribution.depth} · {attribution.agentsSpawned} agents · {attribution.hypothesesProposed} hypotheses · {attribution.elapsed.toFixed(1)}s
-        </span>
-        <span style={{ fontFamily: mono, fontSize: 10, color: isLive ? C.yes : C.accent }}>
-          {isLive ? '● live attribution' : '⚠ simulated'}
-        </span>
-        {isLive && attribution.governance && (
-          <span style={{
-            fontFamily: mono, fontSize: 10, padding: '2px 6px', borderRadius: 3,
-            background: attribution.governance.decision === 'AUTO_RELAY' ? '#eef3e8' :
-              attribution.governance.decision === 'FLAG_REVIEW' ? '#fdf5e6' : '#fdf0ed',
-            color: attribution.governance.decision === 'AUTO_RELAY' ? C.yes :
-              attribution.governance.decision === 'FLAG_REVIEW' ? '#b8860b' : C.accent,
-          }}>
-            {attribution.governance.decision === 'AUTO_RELAY' ? '✓ Auto-approved' :
-             attribution.governance.decision === 'FLAG_REVIEW' ? '⚠ Flagged for review' : '✕ Rejected'}
-          </span>
+    <div style={{ padding: '16px 0' }}>
+      {/* Compact run stats — single line */}
+      <div style={{ fontFamily: mono, fontSize: 10, color: C.muted, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{attribution.agentsSpawned} agents · {attribution.hypothesesProposed} hypotheses · {attribution.elapsed.toFixed(1)}s</span>
+        <span style={{ color: isLive ? C.yes : C.accent }}>{isLive ? '● live' : '⚠ simulated'}</span>
+        {isLive && attribution.governance && attribution.governance.decision === 'AUTO_RELAY' && (
+          <span style={{ color: C.yes }}>✓</span>
         )}
-        <span style={{ fontFamily: mono, fontSize: 10, color: C.muted, marginLeft: 'auto' }}>
-          {primary.length} primary · {alternative.length} alt · {dismissed.length} dismissed
-        </span>
+        <span style={{ marginLeft: 'auto' }}>{primary.length} primary · {alternative.length} alt · {dismissed.length} dismissed</span>
       </div>
 
-      {/* Primary scenario tabs */}
-      <div style={{
-        display: 'flex', gap: 0, marginBottom: 0,
-        borderBottom: `1px solid ${C.border}`,
-        overflowX: 'auto' as const,
-      }}>
-        {primary.map((s) => {
-          const isActive = activeTab === s.id;
-          const confColor = s.confidence >= 0.6 ? C.yes : s.confidence >= 0.3 ? C.accent : C.muted;
-          return (
-            <button
-              key={s.id}
-              onClick={() => setActiveTab(s.id)}
-              style={{
-                padding: '10px 18px',
-                border: 'none',
-                borderBottom: isActive ? `2px solid ${confColor}` : '2px solid transparent',
-                background: isActive ? C.surface : 'transparent',
-                cursor: 'pointer',
-                fontFamily: mono,
-                fontSize: 12,
-                fontWeight: isActive ? 700 : 400,
-                color: isActive ? C.dark : C.muted,
-                display: 'flex', alignItems: 'center', gap: 6,
-                whiteSpace: 'nowrap' as const,
-                transition: 'all 0.2s',
-              }}
-            >
-              <span>{MECHANISM_ICONS[s.mechanism] || '◆'}</span>
-              <span>{s.label.length > 35 ? s.label.slice(0, 32) + '…' : s.label}</span>
-              <span style={{
-                fontWeight: 700, fontSize: 11, color: confColor,
-                background: confColor + '15',
-                padding: '1px 5px', borderRadius: 3,
-              }}>
-                {Math.round(s.confidence * 100)}%
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Primary scenario selector — inline pills, not tab bar */}
+      {primary.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' as const }}>
+          {primary.map((s) => {
+            const isActive = activeTab === s.id;
+            const confColor = s.confidence >= 0.6 ? C.yes : s.confidence >= 0.3 ? C.accent : C.muted;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setActiveTab(s.id)}
+                style={{
+                  padding: '6px 14px',
+                  border: `1px solid ${isActive ? confColor + '60' : C.border}`,
+                  borderRadius: 20,
+                  background: isActive ? confColor + '10' : 'transparent',
+                  cursor: 'pointer',
+                  fontFamily: mono,
+                  fontSize: 11,
+                  fontWeight: isActive ? 700 : 400,
+                  color: isActive ? C.dark : C.muted,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  transition: 'all 0.2s',
+                }}
+              >
+                <span style={{ fontSize: 11 }}>{MECHANISM_ICONS[s.mechanism] || '◆'}</span>
+                <span>{s.label.length > 30 ? s.label.slice(0, 27) + '…' : s.label}</span>
+                <span style={{ fontWeight: 700, fontSize: 10, color: confColor }}>{Math.round(s.confidence * 100)}%</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Active scenario detail */}
       {activeScenario && activeScenario.tier === 'primary' && (
@@ -249,8 +225,7 @@ function ScenarioDetail({ scenario, onAskQuestion }: { scenario: Scenario; onAsk
     <div style={{
       background: C.surface,
       border: `1px solid ${confColor}30`,
-      borderTop: 'none',
-      borderRadius: '0 0 8px 8px',
+      borderRadius: 8,
       padding: '20px 24px',
     }}>
       {/* Confidence + lead agent header */}
