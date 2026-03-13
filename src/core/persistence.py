@@ -381,6 +381,76 @@ class RunRepository:
         ).fetchall()
         return [self._row_to_run(r) for r in rows]
 
+    def list_runs_filtered(
+        self,
+        status: str | None = None,
+        market_id: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AttributionRun]:
+        clauses = ["1=1"]
+        params: list[Any] = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if market_id:
+            clauses.append("market_id = ?")
+            params.append(market_id)
+        if created_after:
+            clauses.append("created_at >= ?")
+            params.append(created_after)
+        if created_before:
+            clauses.append("created_at <= ?")
+            params.append(created_before)
+        where = " AND ".join(clauses)
+        params.extend([limit, offset])
+        rows = self._conn.execute(
+            f"SELECT * FROM runs WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params,
+        ).fetchall()
+        return [self._row_to_run(r) for r in rows]
+
+    def count_runs_by_status(self) -> dict[str, int]:
+        rows = self._conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM runs GROUP BY status"
+        ).fetchall()
+        return {r["status"]: r["cnt"] for r in rows}
+
+    def get_run_stats(self) -> dict[str, Any]:
+        row = self._conn.execute(
+            """SELECT
+                   COUNT(*) as total,
+                   AVG(cost_total_usd) as avg_cost,
+                   AVG(CASE WHEN completed_at IS NOT NULL AND created_at IS NOT NULL
+                       THEN (julianday(completed_at) - julianday(created_at)) * 86400
+                       ELSE NULL END) as avg_duration_seconds
+               FROM runs"""
+        ).fetchone()
+        return {
+            "total": row["total"],
+            "avg_cost_usd": row["avg_cost"] or 0.0,
+            "avg_duration_seconds": row["avg_duration_seconds"] or 0.0,
+        }
+
+    def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
+        now = _iso(datetime.now(timezone.utc))
+        self._conn.execute(
+            "UPDATE runs SET metadata = ?, updated_at = ? WHERE id = ?",
+            (_json(metadata), now, run_id),
+        )
+        self._conn.commit()
+
+    def get_interrogation_sessions_by_run(
+        self, run_id: str,
+    ) -> list[InterrogationSession]:
+        rows = self._conn.execute(
+            "SELECT * FROM interrogation_sessions WHERE run_id = ? ORDER BY created_at",
+            (run_id,),
+        ).fetchall()
+        return [self._row_to_interrogation_session(r) for r in rows]
+
     @staticmethod
     def _row_to_run(row: sqlite3.Row) -> AttributionRun:
         return AttributionRun(

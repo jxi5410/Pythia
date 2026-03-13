@@ -6,18 +6,31 @@ Run locally:
     uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
 
 Endpoints:
-    GET  /health                      — basic health check
-    GET  /health/llm                  — test LLM connectivity
-    POST /api/runs                    — create a new attribution run
-    GET  /api/runs/{run_id}           — full run state
-    GET  /api/runs/{run_id}/status    — just status + stage
-    GET  /api/runs/{run_id}/stream    — SSE stream with reconnect
-    GET  /api/runs/{run_id}/replay    — full event replay from DB
-    POST /api/runs/{run_id}/resume    — resume from checkpoint
-    POST /api/runs/{run_id}/cancel    — cancel running attribution
-    GET  /api/attribute/stream        — legacy SSE (compat shim)
-    POST /api/attribute               — legacy blocking (compat)
-    POST /api/interrogate             — post-attribution chat
+    GET  /health                              — basic health check
+    GET  /health/llm                          — test LLM connectivity
+    POST /api/runs                            — create a new attribution run
+    GET  /api/runs                            — list runs with filters
+    GET  /api/runs/compare                    — compare two runs
+    GET  /api/runs/{run_id}                   — full run state
+    GET  /api/runs/{run_id}/status            — just status + stage
+    GET  /api/runs/{run_id}/stream            — SSE stream with reconnect
+    GET  /api/runs/{run_id}/replay            — full event replay from DB
+    GET  /api/runs/{run_id}/export            — complete run export bundle
+    GET  /api/runs/{run_id}/graph             — reconstructed graph
+    GET  /api/runs/{run_id}/graph/deltas      — raw graph deltas
+    POST /api/runs/{run_id}/resume            — resume from checkpoint
+    POST /api/runs/{run_id}/cancel            — cancel running attribution
+    POST /api/runs/{run_id}/rerun             — rerun same spike
+    PATCH /api/runs/{run_id}                  — mark reviewed / freeze
+    GET  /api/runs/{run_id}/evidence          — evidence with scenario filter
+    GET  /api/runs/{run_id}/scenarios         — all scenarios
+    GET  /api/metrics                         — operational metrics
+    POST /api/interrogation/session           — create interrogation session
+    POST /api/interrogation/message           — send question (SSE stream)
+    GET  /api/interrogation/session/{id}      — session transcript
+    GET  /api/attribute/stream                — legacy SSE (compat shim)
+    POST /api/attribute                       — legacy blocking (compat)
+    POST /api/interrogate                     — legacy post-attribution chat
 """
 
 import asyncio
@@ -296,6 +309,80 @@ async def create_run(req: CreateRunRequest):
         status=run.status.value,
         stream_url=f"/api/runs/{run_id_str}/stream",
     )
+
+
+# ─── GET /api/runs/compare — compare two runs ────────────────────────
+
+@app.get("/api/runs/compare")
+async def compare_runs(run_ids: str = Query(..., description="Comma-separated run IDs")):
+    """Compare two attribution runs: overlapping evidence, divergent scenarios."""
+    ids = [r.strip() for r in run_ids.split(",")]
+    if len(ids) != 2:
+        raise HTTPException(status_code=400, detail="Exactly 2 run_ids required")
+
+    repo = _get_repo()
+    runs = []
+    for rid in ids:
+        run = repo.get_run(rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {rid} not found")
+        runs.append(run)
+
+    # Gather artifacts for both runs
+    scenarios_a = repo.get_scenarios(ids[0])
+    scenarios_b = repo.get_scenarios(ids[1])
+    evidence_a = repo.get_evidence(ids[0])
+    evidence_b = repo.get_evidence(ids[1])
+
+    # Overlapping evidence (by source_url match)
+    urls_a = {ev.source_url: ev for ev in evidence_a if ev.source_url}
+    urls_b = {ev.source_url: ev for ev in evidence_b if ev.source_url}
+    shared_urls = set(urls_a.keys()) & set(urls_b.keys())
+    overlapping_evidence = [
+        {
+            "source_url": url,
+            "run_a": urls_a[url].model_dump(mode="json"),
+            "run_b": urls_b[url].model_dump(mode="json"),
+        }
+        for url in shared_urls
+    ]
+
+    # Primary scenarios
+    primary_a = [s for s in scenarios_a if s.status.value == "primary"]
+    primary_b = [s for s in scenarios_b if s.status.value == "primary"]
+
+    # Confidence differences for matching scenario titles
+    titles_a = {s.title: s for s in scenarios_a}
+    titles_b = {s.title: s for s in scenarios_b}
+    shared_titles = set(titles_a.keys()) & set(titles_b.keys())
+    confidence_diffs = [
+        {
+            "title": title,
+            "run_a_confidence": titles_a[title].confidence_score,
+            "run_b_confidence": titles_b[title].confidence_score,
+            "delta": round(titles_a[title].confidence_score - titles_b[title].confidence_score, 4),
+        }
+        for title in shared_titles
+    ]
+
+    # Divergent scenarios (present in one but not the other)
+    only_a_titles = set(titles_a.keys()) - set(titles_b.keys())
+    only_b_titles = set(titles_b.keys()) - set(titles_a.keys())
+
+    return {
+        "run_a": runs[0].model_dump(mode="json"),
+        "run_b": runs[1].model_dump(mode="json"),
+        "overlapping_evidence": overlapping_evidence,
+        "confidence_differences": confidence_diffs,
+        "divergent_scenarios": {
+            "only_in_a": [titles_a[t].model_dump(mode="json") for t in only_a_titles],
+            "only_in_b": [titles_b[t].model_dump(mode="json") for t in only_b_titles],
+        },
+        "primary_scenarios": {
+            "run_a": [s.model_dump(mode="json") for s in primary_a],
+            "run_b": [s.model_dump(mode="json") for s in primary_b],
+        },
+    }
 
 
 # ─── GET /api/runs/{run_id} — full run state ─────────────────────────
@@ -692,6 +779,179 @@ async def cancel_run(run_id: str):
 
     repo.update_run_status(run_id, RunStatus.CANCELLED)
     return {"run_id": run_id, "status": "cancelled"}
+
+
+# ─── GET /api/runs — list runs with filters ──────────────────────────
+
+@app.get("/api/runs")
+async def list_runs(
+    status: str = Query(None),
+    market_id: str = Query(None),
+    created_after: str = Query(None),
+    created_before: str = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """List all runs with optional filters."""
+    repo = _get_repo()
+    runs = repo.list_runs_filtered(
+        status=status, market_id=market_id,
+        created_after=created_after, created_before=created_before,
+        limit=limit, offset=offset,
+    )
+    return {
+        "runs": [r.model_dump(mode="json") for r in runs],
+        "count": len(runs),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+# ─── GET /api/runs/{run_id}/export — full export bundle ──────────────
+
+@app.get("/api/runs/{run_id}/export")
+async def export_run(run_id: str):
+    """Export a complete run bundle as a single JSON object."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    scenarios = repo.get_scenarios(run_id)
+    evidence = repo.get_evidence(run_id)
+    actions = repo.get_actions(run_id)
+    governance = repo.get_governance_decisions(run_id)
+
+    # Scenarios with revisions and evidence links
+    scenarios_export = []
+    for sc in scenarios:
+        revisions = repo.get_scenario_revisions(str(sc.id))
+        links = repo.get_evidence_links_by_scenario(str(sc.id))
+        scenarios_export.append({
+            "scenario": sc.model_dump(mode="json"),
+            "revisions": [r.model_dump(mode="json") for r in revisions],
+            "evidence_links": [l.model_dump(mode="json") for l in links],
+        })
+
+    # Evidence with scenario links
+    evidence_export = []
+    for ev in evidence:
+        links = repo.get_evidence_links_by_evidence(str(ev.id))
+        evidence_export.append({
+            "evidence": ev.model_dump(mode="json"),
+            "scenario_links": [l.model_dump(mode="json") for l in links],
+        })
+
+    # Graph snapshot
+    gm = _get_graph_manager()
+    graph = gm.get_run_graph(run_id)
+
+    # Interrogation transcripts
+    sessions = repo.get_interrogation_sessions_by_run(run_id)
+    interrogation_export = []
+    for sess in sessions:
+        messages = repo.get_interrogation_messages(str(sess.id))
+        interrogation_export.append({
+            "session": sess.model_dump(mode="json"),
+            "messages": [m.model_dump(mode="json") for m in messages],
+        })
+
+    # Spike event from run metadata
+    spike_event = run.metadata.get("spike_event")
+
+    return {
+        "export_version": "1.0",
+        "run": run.model_dump(mode="json"),
+        "spike_event": spike_event,
+        "actions": [a.model_dump(mode="json") for a in actions],
+        "evidence": evidence_export,
+        "scenarios": scenarios_export,
+        "graph": graph,
+        "governance": [g.model_dump(mode="json") for g in governance],
+        "interrogation": interrogation_export,
+    }
+
+# ─── POST /api/runs/{run_id}/rerun — rerun same spike ────────────────
+
+class RerunRequest(BaseModel):
+    depth: int = 2
+
+
+@app.post("/api/runs/{run_id}/rerun")
+async def rerun_attribution(run_id: str, req: RerunRequest = RerunRequest()):
+    """Create a new run for the same spike event with optional different depth."""
+    repo = _get_repo()
+    original = repo.get_run(run_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    from src.core.models import AttributionRun
+    new_run = AttributionRun(
+        spike_event_id=original.spike_event_id,
+        market_id=original.market_id,
+        status=RunStatus.CREATED,
+        bace_depth=req.depth,
+        metadata={
+            **original.metadata,
+            "rerun_of": run_id,
+        },
+    )
+    repo.create_run(new_run)
+
+    new_id = str(new_run.id)
+    return {
+        "run_id": new_id,
+        "rerun_of": run_id,
+        "depth": req.depth,
+        "status": new_run.status.value,
+        "stream_url": f"/api/runs/{new_id}/stream",
+    }
+
+
+# ─── PATCH /api/runs/{run_id} — operator controls ────────────────────
+
+class PatchRunRequest(BaseModel):
+    reviewed: Optional[bool] = None
+    frozen: Optional[bool] = None
+
+
+@app.patch("/api/runs/{run_id}")
+async def patch_run(run_id: str, req: PatchRunRequest):
+    """Mark a run as reviewed and/or freeze its scenario set."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    metadata = dict(run.metadata)
+    if req.reviewed is not None:
+        metadata["reviewed"] = req.reviewed
+    if req.frozen is not None:
+        metadata["frozen"] = req.frozen
+    repo.update_run_metadata(run_id, metadata)
+
+    return {
+        "run_id": run_id,
+        "reviewed": metadata.get("reviewed", False),
+        "frozen": metadata.get("frozen", False),
+    }
+
+
+# ─── GET /api/metrics — operational metrics ──────────────────────────
+
+@app.get("/api/metrics")
+async def get_metrics():
+    """Basic operational metrics: total runs, status breakdown, averages."""
+    repo = _get_repo()
+    stats = repo.get_run_stats()
+    by_status = repo.count_runs_by_status()
+
+    return {
+        "total_runs": stats["total"],
+        "runs_by_status": by_status,
+        "avg_cost_usd": round(stats["avg_cost_usd"], 4),
+        "avg_duration_seconds": round(stats["avg_duration_seconds"], 2),
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════
