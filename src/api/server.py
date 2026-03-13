@@ -335,6 +335,49 @@ async def get_run_status(run_id: str):
     )
 
 
+# ─── Evidence endpoints ───────────────────────────────────────────────
+
+@app.get("/api/runs/{run_id}/evidence")
+async def get_run_evidence(
+    run_id: str,
+    scenario_id: str = Query(None),
+):
+    """All evidence for a run, optionally filtered by linked scenario."""
+    repo = _get_repo()
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if scenario_id:
+        from src.core.evidence_ledger import EvidenceLedger
+        ledger = EvidenceLedger(repo)
+        grouped = ledger.get_scenario_evidence(scenario_id)
+        return {
+            "run_id": run_id,
+            "scenario_id": scenario_id,
+            "supporting": [e.model_dump(mode="json") for e in grouped["supporting"]],
+            "challenging": [e.model_dump(mode="json") for e in grouped["challenging"]],
+            "rebutting": [e.model_dump(mode="json") for e in grouped["rebutting"]],
+            "unresolved": [e.model_dump(mode="json") for e in grouped["unresolved"]],
+        }
+
+    evidence = repo.get_evidence(run_id)
+    return {
+        "run_id": run_id,
+        "evidence": [e.model_dump(mode="json") for e in evidence],
+    }
+
+
+@app.get("/api/evidence/{evidence_id}")
+async def get_evidence_item(evidence_id: str):
+    """Single evidence item by ID."""
+    repo = _get_repo()
+    item = repo.get_evidence_by_id(evidence_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return item.model_dump(mode="json")
+
+
 # ─── GET /api/runs/{run_id}/stream — SSE with reconnect ──────────────
 
 @app.get("/api/runs/{run_id}/stream")

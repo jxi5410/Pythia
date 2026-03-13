@@ -594,6 +594,33 @@ class RunRepository:
         )
         self._conn.commit()
 
+    def get_evidence_links_by_scenario(
+        self, scenario_id: str,
+    ) -> list[ScenarioEvidenceLink]:
+        rows = self._conn.execute(
+            "SELECT * FROM scenario_evidence_links WHERE scenario_id = ?",
+            (scenario_id,),
+        ).fetchall()
+        return [
+            ScenarioEvidenceLink(
+                id=UUID(r["id"]),
+                scenario_id=UUID(r["scenario_id"]),
+                evidence_id=UUID(r["evidence_id"]),
+                link_type=ScenarioEvidenceLinkType(r["link_type"]),
+                agent_name=r["agent_name"],
+                created_at=_parse_dt(r["created_at"]),
+            )
+            for r in rows
+        ]
+
+    def get_evidence_by_id(self, evidence_id: str) -> EvidenceItem | None:
+        row = self._conn.execute(
+            "SELECT * FROM evidence_items WHERE id = ?", (evidence_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_evidence(row)
+
     # ── Graph deltas ──────────────────────────────────────────────
 
     def save_graph_delta(self, delta: GraphDelta) -> None:

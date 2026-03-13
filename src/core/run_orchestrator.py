@@ -273,6 +273,9 @@ class RunOrchestrator:
     def __init__(self, db: RunRepository, bace_depth: int = 2) -> None:
         self._db = db
         self._bace_depth = bace_depth
+        # Lazy import to avoid circular dependency at module level
+        from src.core.evidence_ledger import EvidenceLedger
+        self._ledger = EvidenceLedger(db)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -460,17 +463,23 @@ class RunOrchestrator:
                     )
 
                 elif step == "proposal":
-                    # Each proposal contains agent hypotheses — persist as evidence
+                    # Each proposal contains agent hypotheses — ingest
+                    # through the evidence ledger for normalization,
+                    # deduplication, and scoring.
                     agent_name = data.get("agent", "")
+                    ingested = 0
                     for hyp in data.get("hypotheses", []):
-                        ev = _evidence_to_model(run_id, hyp, agent_name)
-                        self._db.save_evidence(ev)
+                        item = self._ledger.ingest_evidence(
+                            run_id, hyp, provider_agent=agent_name,
+                        )
+                        if item is not None:
+                            ingested += 1
 
                     await self._emit(
                         on_event, run_id, "attribution_started",
                         SSEEventType.EVIDENCE_ADDED, seq, {
                             "agent": agent_name,
-                            "count": len(data.get("hypotheses", [])),
+                            "count": ingested,
                         },
                     )
 
