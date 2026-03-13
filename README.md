@@ -90,12 +90,14 @@ Each scenario includes: confidence score, lead + supporting agents, evidence cha
 
 ## Frontend — Staged Intelligence Dashboard
 
-4-stage workflow, each with its own route (shareable, resumable):
+4-stage workflow with **run-centric URLs** — every run gets a canonical `/run/{id}` URL that is shareable, bookmarkable, and resumable across page refreshes:
 
-1. **Market Selection** (`/`) — Search Polymarket/Kalshi markets, spike count badges, interactive price charts
-2. **Attribution** (`/attribution`) — Live BACE run with force-directed knowledge graph growing from SSE events, real-time action feed (CHALLENGE=red, SUPPORT=green, REBUT=blue)
-3. **Scenarios** (`/scenarios`) — Primary scenario with evidence chains and agent consensus. Alternatives expandable. Dismissed with rejection reasoning. "What breaks this" callouts.
-4. **Interrogation** (`/interrogation`) — Select a specific agent, interrogate it in-character about its analysis, evidence, and reasoning via streaming chat
+1. **Market Selection** (`/`) — Search Polymarket/Kalshi markets, spike count badges, interactive price charts. Clicking a spike creates a run via `POST /api/runs` and navigates to its URL.
+2. **Attribution** (`/run/{id}`) — Live BACE run with force-directed knowledge graph growing from SSE events, real-time action feed (CHALLENGE=red, SUPPORT=green, REBUT=blue). State hydrated from backend on load.
+3. **Scenarios** (`/run/{id}/scenarios`) — Primary scenario with evidence chains and agent consensus. Alternatives expandable. Dismissed with rejection reasoning. "What breaks this" callouts. Revision count badges.
+4. **Interrogation** (`/run/{id}/interrogation`) — Session-based interrogation via backend API. Target a specific scenario or agent. Streaming responses with artifact references.
+
+**Run Hydration:** Opening any `/run/{id}` URL fetches the full run state from the backend (spike context, scenarios, evidence, graph). If the run is still active, the frontend connects to the SSE stream. If completed, it replays stored events for the graph animation.
 
 **Visualization:** Force-directed knowledge graph where entities and agents appear organically as SSE streams them. Convergence = clustering, divergence = conflict edges.
 
@@ -322,24 +324,35 @@ pythia/
 ├── frontend/                            # Next.js — Staged Intelligence Dashboard
 │   ├── app/
 │   │   ├── page.tsx                    # Stage 1: Market selection + search
-│   │   ├── attribution/page.tsx        # Stage 2: Live BACE run + graph
-│   │   ├── scenarios/page.tsx          # Stage 3: Scenario view
-│   │   ├── interrogation/page.tsx      # Stage 4: Agent interview
+│   │   ├── run/[runId]/
+│   │   │   ├── layout.tsx             # Run layout — hydrates state from backend
+│   │   │   ├── page.tsx               # Stage 2: Live BACE run + graph
+│   │   │   ├── scenarios/page.tsx     # Stage 3: Scenario view
+│   │   │   └── interrogation/page.tsx # Stage 4: Agent interview
+│   │   ├── attribution/page.tsx        # Redirect → /
+│   │   ├── scenarios/page.tsx          # Redirect → /
+│   │   ├── interrogation/page.tsx      # Redirect → /
 │   │   └── api/                        # Next.js API routes (proxy to backend)
 │   ├── components/
+│   │   ├── RunHydrator.tsx             # Client hydration — fetches run, connects SSE
 │   │   ├── BACEGraphAnimation.tsx      # Force-directed knowledge graph
 │   │   ├── ScenarioPanel.tsx           # Scenario display + evidence chains
-│   │   ├── InterrogationChat.tsx       # Agent interview streaming chat
+│   │   ├── InterrogationChat.tsx       # Session-based agent interview chat
 │   │   ├── SpikeChart.tsx              # Price chart with spike overlay
 │   │   └── NavHeader.tsx               # Stage progression breadcrumb
 │   ├── lib/
-│   │   └── run-store.tsx               # Cross-stage state management
+│   │   ├── run-store.tsx               # Run-centric state management + initRun
+│   │   └── bace-runner.ts             # SSE stream + canonical envelope parsing
 │   └── types/
 ├── governance.yaml                      # Governance config (circuit breakers, gates)
 ├── scripts/
 │   ├── backfill_spikes.py              # Historical spike ingestion
 │   └── retrain_model.py               # Weekly model retraining
 └── tests/
+    ├── conftest.py                    # Global test config (disables rate limiter)
+    ├── test_integration.py            # 33 integration tests (run lifecycle, SSE, evidence, interrogation)
+    ├── test_production_polish.py      # Production API tests (export, compare, rerun, metrics)
+    └── ...                            # Unit tests (SSE, evidence ledger, scenarios, graph)
 ```
 
 ---
@@ -360,7 +373,8 @@ cd frontend && npm install && npm run dev
 
 # Run tests
 python3 -m pytest tests/test_sse.py tests/test_evidence_ledger.py tests/test_scenario_engine.py \
-    tests/test_interrogation.py tests/test_graph_manager.py tests/test_production_polish.py -v
+    tests/test_interrogation.py tests/test_graph_manager.py tests/test_production_polish.py \
+    tests/test_integration.py -v
 ```
 
 ### Environment Variables
@@ -378,6 +392,15 @@ PYTHIA_BACE_DEPTH=2
 
 # Database (default: pythia.db in project root)
 PYTHIA_DB_PATH=pythia.db
+
+# Rate limiting (requests per minute per IP, default: 60)
+PYTHIA_RATE_LIMIT_RPM=60
+
+# CORS origin (default: allows common local + deployed origins)
+PYTHIA_CORS_ORIGIN=https://pythia-demo.vercel.app
+
+# Testing mode (disables rate limiter, set automatically by conftest.py)
+PYTHIA_TESTING=1
 ```
 
 ---
