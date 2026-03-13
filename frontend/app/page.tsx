@@ -82,10 +82,58 @@ export default function MarketPage() {
     } catch (err: any) { setError(`Failed: ${err.message}`); setPhase('idle'); }
   }, []);
 
-  const handleSpikeClick = useCallback((spike: Spike) => {
+  const [isCreatingRun, setIsCreatingRun] = useState(false);
+
+  const handleSpikeClick = useCallback(async (spike: Spike) => {
     setLocalSelectedSpike(spike);
-    setRun({ searchResults: localResults, selectedMarket: localMarket, prices: localPrices, spikes: localSpikes, selectedSpike: spike, currentStage: 'attribution', completedStages: new Set(['market']) });
-    router.push('/attribution');
+    setIsCreatingRun(true);
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${backendUrl}/api/runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          market_title: localMarket!.question,
+          market_id: localMarket!.id,
+          timestamp: spike.timestamp,
+          direction: spike.direction,
+          magnitude: spike.magnitude,
+          price_before: spike.priceBefore,
+          price_after: spike.priceAfter,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Failed to create run (${res.status})`);
+      const { run_id } = await res.json();
+
+      setRun({
+        runId: run_id,
+        searchResults: localResults,
+        selectedMarket: localMarket,
+        prices: localPrices,
+        spikes: localSpikes,
+        selectedSpike: spike,
+        currentStage: 'attribution',
+        completedStages: new Set(['market'] as const),
+      });
+      router.push(`/run/${run_id}`);
+    } catch (err: any) {
+      console.error('[Pythia] Failed to create run:', err);
+      // Fallback: navigate to old attribution route
+      setRun({
+        searchResults: localResults,
+        selectedMarket: localMarket,
+        prices: localPrices,
+        spikes: localSpikes,
+        selectedSpike: spike,
+        currentStage: 'attribution',
+        completedStages: new Set(['market'] as const),
+      });
+      router.push('/attribution');
+    } finally {
+      setIsCreatingRun(false);
+    }
   }, [localResults, localMarket, localPrices, localSpikes, setRun, router]);
 
   const currentPrice = localMarket?.outcomePrices?.[0] ? `${(parseFloat(localMarket.outcomePrices[0]) * 100).toFixed(1)}¢` : null;
@@ -138,7 +186,7 @@ export default function MarketPage() {
             <MiniChart prices={localPrices} spikes={localSpikes} selectedSpike={localSelectedSpike} onSpikeClick={handleSpikeClick} />
             {localSpikes.length === 0 && <div style={{ textAlign: 'center' as const, padding: '12px 0', fontFamily: mono, fontSize: 12, color: C.muted }}>No significant spikes detected</div>}
           </div>
-          {localSpikes.length > 0 && <div style={{ fontFamily: mono, fontSize: 12, color: C.muted, textAlign: 'center' as const, padding: '8px 0' }}>Click any spike dot to run BACE attribution →</div>}
+          {localSpikes.length > 0 && <div style={{ fontFamily: mono, fontSize: 12, color: C.muted, textAlign: 'center' as const, padding: '8px 0' }}>{isCreatingRun ? 'Creating run...' : 'Click any spike dot to run BACE attribution \u2192'}</div>}
         </div>)}
 
         {phase === 'idle' && !error && (<div style={{ textAlign: 'center' as const, padding: '80px 0', color: C.muted }}>

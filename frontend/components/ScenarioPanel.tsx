@@ -28,6 +28,8 @@ export interface Scenario {
   temporal_fit: string;
   impact_speed: string;
   time_to_peak: string;
+  revision_count?: number;
+  dismissed_reason?: string;
 }
 
 /** Full attribution result with scenarios */
@@ -239,6 +241,14 @@ function ScenarioDetail({ scenario, onAskQuestion }: { scenario: Scenario; onAsk
         <span style={{ fontFamily: mono, fontSize: 11, color: AGENT_COLORS[scenario.lead_agent] || C.info }}>
           Lead: {scenario.lead_agent}
         </span>
+        {scenario.revision_count !== undefined && scenario.revision_count > 0 && (
+          <span style={{
+            fontFamily: mono, fontSize: 9, padding: '1px 6px', borderRadius: 10,
+            background: C.faint, border: `1px solid ${C.border}`, color: C.muted,
+          }}>
+            {scenario.revision_count} revision{scenario.revision_count !== 1 ? 's' : ''}
+          </span>
+        )}
       </div>
 
       {/* Causal narrative */}
@@ -443,9 +453,9 @@ function DismissedCard({ scenario }: { scenario: Scenario }) {
           {Math.round(scenario.confidence * 100)}%
         </span>
       </div>
-      {scenario.what_breaks_this && (
+      {(scenario.dismissed_reason || scenario.what_breaks_this) && (
         <div style={{ fontFamily: serif, fontSize: 11, color: C.muted, marginTop: 4, paddingLeft: 20, lineHeight: 1.4 }}>
-          Dismissed: {scenario.what_breaks_this.slice(0, 120)}{scenario.what_breaks_this.length > 120 ? '…' : ''}
+          Dismissed: {(scenario.dismissed_reason || scenario.what_breaks_this).slice(0, 120)}{(scenario.dismissed_reason || scenario.what_breaks_this).length > 120 ? '\u2026' : ''}
         </div>
       )}
       {scenario.challenging_agents.length > 0 && (

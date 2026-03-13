@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { connectRunStream } from './bace-runner';
 import type { BACEGraphState, OntologyEntity, OntologyRelationship, AgentInfo, ProposalHypothesis, DivergencePair } from '@/components/BACEGraphAnimation';
 
 // ─── Core types ─────────────────────────────────────────────────────
@@ -69,7 +70,14 @@ export type Stage = 'market' | 'attribution' | 'scenarios' | 'interrogation';
 
 // ─── Run Store ──────────────────────────────────────────────────────
 
+export type RunStatus = 'idle' | 'created' | 'running' | 'completed' | 'failed' | 'error';
+
 export interface RunState {
+  // Run identity
+  runId: string | null;
+  runStatus: RunStatus;
+  lastEventSequence: number;
+
   // Stage 1: Market
   searchResults: MarketResult[];
   selectedMarket: MarketResult | null;
@@ -105,6 +113,9 @@ const defaultGraphState: BACEGraphState = {
 };
 
 const defaultRunState: RunState = {
+  runId: null,
+  runStatus: 'idle',
+  lastEventSequence: 0,
   searchResults: [],
   selectedMarket: null,
   prices: [],
@@ -127,6 +138,7 @@ interface RunStoreContextValue {
   setRun: (updater: Partial<RunState> | ((prev: RunState) => Partial<RunState>)) => void;
   resetRun: () => void;
   canNavigateTo: (stage: Stage) => boolean;
+  initRun: (runId: string) => Promise<void>;
 }
 
 const RunStoreContext = createContext<RunStoreContextValue | null>(null);
@@ -148,15 +160,144 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
   const canNavigateTo = useCallback((stage: Stage): boolean => {
     switch (stage) {
       case 'market': return true;
-      case 'attribution': return run.selectedSpike !== null;
-      case 'scenarios': return run.attribution !== null;
-      case 'interrogation': return run.attribution !== null;
+      case 'attribution': return run.runId !== null || run.selectedSpike !== null;
+      case 'scenarios': return run.runId !== null && (run.runStatus === 'completed' || run.attribution !== null);
+      case 'interrogation': return run.runId !== null && (run.runStatus === 'completed' || run.attribution !== null);
       default: return false;
     }
-  }, [run.selectedSpike, run.attribution]);
+  }, [run.runId, run.runStatus, run.selectedSpike, run.attribution]);
+
+  const initRunRef = useRef<string | null>(null);
+
+  const initRun = useCallback(async (runId: string) => {
+    // Prevent duplicate init for the same runId
+    if (initRunRef.current === runId) return;
+    initRunRef.current = runId;
+
+    setRunState(prev => ({ ...prev, runId, runStatus: 'running' }));
+
+    const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
+
+    try {
+      const res = await fetch(`${backendUrl}/api/runs/${runId}`);
+      if (!res.ok) throw new Error(`Run not found (${res.status})`);
+      const data = await res.json();
+      const runData = data.run || data;
+
+      // Map spike event from metadata
+      const spikeEvent = runData.metadata?.spike_event;
+      const selectedSpike: Spike | null = spikeEvent ? {
+        index: 0,
+        timestamp: spikeEvent.timestamp || runData.metadata?.timestamp || '',
+        magnitude: spikeEvent.magnitude || runData.metadata?.magnitude || 0,
+        direction: spikeEvent.direction || runData.metadata?.direction || 'up',
+        priceBefore: spikeEvent.price_before || runData.metadata?.price_before || 0,
+        priceAfter: spikeEvent.price_after || runData.metadata?.price_after || 0,
+      } : (runData.metadata ? {
+        index: 0,
+        timestamp: runData.metadata.timestamp || '',
+        magnitude: runData.metadata.magnitude || 0,
+        direction: runData.metadata.direction || 'up',
+        priceBefore: runData.metadata.price_before || 0,
+        priceAfter: runData.metadata.price_after || 0,
+      } : null);
+
+      const selectedMarket: MarketResult | null = runData.metadata?.market_title ? {
+        id: runData.metadata.market_id || '',
+        question: runData.metadata.market_title,
+        slug: '', conditionId: '', clobTokenIds: [], outcomes: [], outcomePrices: [],
+        volume24hr: 0, volume: 0, image: '',
+      } : null;
+
+      // Map backend status to our status
+      const statusMap: Record<string, RunStatus> = {
+        'pending': 'created', 'running': 'running', 'completed': 'completed',
+        'failed': 'failed', 'error': 'error',
+      };
+      const mappedStatus: RunStatus = statusMap[runData.status] || 'running';
+
+      // Build attribution from scenarios/evidence if completed
+      let attribution: Attribution | null = null;
+      if (data.scenarios?.length || data.actions?.length) {
+        const scenarios: Scenario[] = (data.scenarios || []).map((s: any) => ({
+          id: s.id || `scenario-${s.mechanism}`, label: s.label || '', mechanism: s.mechanism || 'other',
+          tier: s.tier || 'primary', confidence: s.confidence || 0, lead_agent: s.lead_agent || '',
+          supporting_agents: s.supporting_agents || [], challenging_agents: s.challenging_agents || [],
+          evidence_chain: s.evidence_chain || [], evidence_urls: s.evidence_urls || [],
+          what_breaks_this: s.what_breaks_this || '', causal_chain: s.causal_chain || '',
+          temporal_fit: s.temporal_fit || '', impact_speed: s.impact_speed || '', time_to_peak: s.time_to_peak || '',
+        }));
+        attribution = {
+          depth: runData.metadata?.depth || 2,
+          agentsSpawned: data.actions?.length || 0,
+          hypothesesProposed: scenarios.length,
+          debateRounds: 0,
+          elapsed: runData.metadata?.elapsed_seconds || 0,
+          hypotheses: [],
+          scenarios,
+          rawResult: data,
+        };
+      }
+
+      const updates: Partial<RunState> = {
+        runId,
+        runStatus: mappedStatus,
+        selectedSpike,
+        selectedMarket,
+        currentStage: mappedStatus === 'completed' ? 'scenarios' : 'attribution',
+        completedStages: new Set(mappedStatus === 'completed' ? ['market', 'attribution'] as Stage[] : ['market'] as Stage[]),
+        isLive: true,
+      };
+      if (attribution) {
+        updates.attribution = attribution;
+        updates.completedStages = new Set(['market', 'attribution'] as Stage[]);
+      }
+
+      setRunState(prev => ({ ...prev, ...updates }));
+
+      // Connect to SSE stream for live updates or replay
+      const streamCallbacks = {
+        onBaceState: (state: BACEState) => setRunState(prev => ({ ...prev, baceState: state })),
+        onGraphState: (state: BACEGraphState) => setRunState(prev => ({ ...prev, graphState: state })),
+        onComplete: (attr: Attribution) => {
+          setRunState(prev => ({
+            ...prev,
+            attribution: attr,
+            isRunning: false,
+            isLive: true,
+            runStatus: 'completed' as RunStatus,
+            currentStage: 'scenarios' as Stage,
+            completedStages: new Set(['market', 'attribution'] as Stage[]),
+          }));
+        },
+        onError: (err: string) => {
+          console.error('[Pythia] Stream error:', err);
+          setRunState(prev => ({ ...prev, runStatus: 'error' as RunStatus, isRunning: false }));
+        },
+        onSequence: (seq: number) => {
+          setRunState(prev => ({ ...prev, lastEventSequence: Math.max(prev.lastEventSequence, seq) }));
+        },
+      };
+
+      if (mappedStatus === 'running') {
+        setRunState(prev => ({ ...prev, isRunning: true }));
+        connectRunStream(runId, 0, streamCallbacks).catch(err => {
+          console.error('[Pythia] Stream connect error:', err);
+        });
+      } else if (mappedStatus === 'completed') {
+        connectRunStream(runId, 0, streamCallbacks, { replay: true }).catch(err => {
+          console.error('[Pythia] Replay connect error:', err);
+        });
+      }
+    } catch (err: any) {
+      console.error('[Pythia] initRun failed:', err);
+      setRunState(prev => ({ ...prev, runId, runStatus: 'error' }));
+      throw err;
+    }
+  }, []);
 
   return (
-    <RunStoreContext.Provider value={{ run, setRun, resetRun, canNavigateTo }}>
+    <RunStoreContext.Provider value={{ run, setRun, resetRun, canNavigateTo, initRun }}>
       {children}
     </RunStoreContext.Provider>
   );

@@ -11,7 +11,9 @@ interface ChatMessage {
 }
 
 interface InterrogationChatProps {
-  /** Full attribution result context to send with each question */
+  /** Run ID for session-based API (preferred) */
+  runId?: string;
+  /** Full attribution result context to send with each question (fallback) */
   attributionContext: any;
   /** Market question/title */
   marketTitle: string;
@@ -37,6 +39,7 @@ const serif = "'Source Serif 4', Georgia, serif";
 // ─── Component ──────────────────────────────────────────────────────
 
 export default function InterrogationChat({
+  runId,
   attributionContext,
   marketTitle,
   initialQuestion,
@@ -48,6 +51,7 @@ export default function InterrogationChat({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isOpen, setIsOpen] = useState(alwaysOpen);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const initialSent = useRef(false);
@@ -96,17 +100,55 @@ export default function InterrogationChat({
 
     try {
       const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${backendUrl}/api/interrogate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: question.trim(),
-          context: attributionContext,
-          market_title: marketTitle,
-          history: conversationHistory.slice(-6),
-          agent_id: selectedAgent || undefined,
-        }),
-      });
+
+      // Session-based API: create session on first message if runId available
+      let currentSessionId = sessionId;
+      if (runId && !currentSessionId) {
+        try {
+          const sessionRes = await fetch(`${backendUrl}/api/interrogation/session`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              run_id: runId,
+              target_type: selectedAgent ? 'agent' : 'scenario',
+              target_id: selectedAgent || 'general',
+            }),
+          });
+          if (sessionRes.ok) {
+            const sessionData = await sessionRes.json();
+            currentSessionId = sessionData.session_id || sessionData.id;
+            setSessionId(currentSessionId);
+          }
+        } catch {
+          // Fall through to legacy API
+        }
+      }
+
+      // Use session API if we have a session, otherwise fall back to legacy
+      let res: Response;
+      if (currentSessionId) {
+        res = await fetch(`${backendUrl}/api/interrogation/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: currentSessionId,
+            question: question.trim(),
+            answer_mode: 'concise',
+          }),
+        });
+      } else {
+        res = await fetch(`${backendUrl}/api/interrogate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: question.trim(),
+            context: attributionContext,
+            market_title: marketTitle,
+            history: conversationHistory.slice(-6),
+            agent_id: selectedAgent || undefined,
+          }),
+        });
+      }
 
       if (!res.ok || !res.body) {
         // Fallback: generate a local response
@@ -187,7 +229,7 @@ export default function InterrogationChat({
     }
 
     setIsStreaming(false);
-  }, [isStreaming, messages, attributionContext, marketTitle]);
+  }, [isStreaming, messages, attributionContext, marketTitle, runId, sessionId, selectedAgent]);
 
   if (!isOpen) {
     return (
@@ -237,6 +279,7 @@ export default function InterrogationChat({
               value={selectedAgent || ''}
               onChange={(e) => {
                 setSelectedAgent(e.target.value || null);
+                setSessionId(null); // Reset session for new agent
                 if (e.target.value) {
                   setMessages(prev => [...prev, {
                     role: 'assistant' as const,
