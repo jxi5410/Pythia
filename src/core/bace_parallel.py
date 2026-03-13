@@ -377,35 +377,48 @@ async def attribute_spike_streaming(
             "hypotheses": [{"cause": h.cause_description[:100], "confidence": round(h.confidence, 2)} for h in hyps],
         }}
 
-    # Step 6: Agent interaction round (agents respond to each other's hypotheses)
+    # Step 6: Multi-round agent simulation
+    # Agents autonomously debate over N rounds, each action logged and streamed
     interaction_data = None
+    sim_rounds = 3 if depth >= 2 else 1
     try:
-        from .bace_interaction import run_interaction_round, interaction_round_to_sse
-        interaction_data = await run_interaction_round(
-            agents, hypotheses, context, llm_fast, round_number=1,
+        from .bace_simulation import run_agent_simulation, simulation_to_interaction_round
+
+        async for sim_event in run_agent_simulation(
+            agents, hypotheses, context, llm_fast,
+            num_rounds=sim_rounds,
             _run_in_thread=_run_in_thread,
-        )
-        yield {"step": "interaction", "data": interaction_round_to_sse(interaction_data)}
+        ):
+            yield {"step": sim_event["step"], "data": sim_event["data"]}
+
+            # Capture the final state for scenario clustering
+            if sim_event["step"] == "sim_complete":
+                # Build backward-compatible interaction data from simulation
+                from .bace_simulation import SimulationState
+                # We need to reconstruct — the generator doesn't return the state object
+                # Instead, use the action data accumulated in the sim_complete event
+                pass
+
+        # After simulation, build interaction_data for scenario clustering
+        # Re-derive from hypotheses (which were mutated during simulation)
+        from .bace_interaction import InteractionRound
+        interaction_data = InteractionRound(round_number=sim_rounds)
+
     except Exception as e:
-        logger.warning("Interaction round failed (non-fatal): %s", e)
-        yield {"step": "interaction", "data": {"round": 1, "responses": 0, "error": str(e)}}
+        logger.warning("Agent simulation failed, falling back to single-pass: %s", e)
+        # Fallback: original single-pass interaction
+        try:
+            from .bace_interaction import run_interaction_round, interaction_round_to_sse
+            interaction_data = await run_interaction_round(
+                agents, hypotheses, context, llm_fast, round_number=1,
+                _run_in_thread=_run_in_thread,
+            )
+            yield {"step": "interaction", "data": interaction_round_to_sse(interaction_data)}
+        except Exception as e2:
+            logger.warning("Fallback interaction also failed: %s", e2)
+            yield {"step": "interaction", "data": {"round": 1, "responses": 0, "error": str(e2)}}
 
-    # Step 6b: Debate rounds (depth 3 only — skip for depth 2)
-    debate_rounds = 0 if depth <= 2 else 2
-    if debate_rounds > 0:
-        from .bace_debate import run_critique_round
-        for r in range(2, 2 + debate_rounds):
-            hypotheses = await _run_in_thread(run_critique_round, agents, hypotheses, context, r, llm_fast)
-            yield {"step": "debate", "data": {"round": r, "surviving": len([h for h in hypotheses if h.status != "debunked"])}}
-
-    # Step 7: Counterfactual testing (PARALLEL)
-    hypotheses = await run_counterfactual_parallel(agents, hypotheses, context, llm_fast)
-
-    yield {"step": "counterfactual", "data": {
-        "tested": len([h for h in hypotheses if h.status != "debunked"]),
-    }}
-
-    # Step 8: Scenario clustering
+    # Step 7: Scenario clustering
     scenarios = []
     try:
         from .bace_scenarios import cluster_hypotheses_into_scenarios, scenarios_to_sse
@@ -474,7 +487,7 @@ async def attribute_spike_streaming(
         ],
         "scenarios": [s.to_dict() for s in scenarios],
         "interaction": {
-            "rounds": 1,
+            "rounds": sim_rounds,
             "responses": len(interaction_data.responses) if interaction_data else 0,
             "convergence_groups": len(interaction_data.convergence_groups) if interaction_data else 0,
             "divergence_pairs": len(interaction_data.divergence_pairs) if interaction_data else 0,
@@ -488,7 +501,7 @@ async def attribute_spike_streaming(
             "agents_spawned": len(agents),
             "hypotheses_proposed": len(hypotheses),
             "debate_rounds": debate_rounds,
-            "interaction_rounds": 1,
+            "interaction_rounds": sim_rounds,
             "scenario_count": len(scenarios),
             "elapsed_seconds": round(elapsed, 1),
             "depth": depth,

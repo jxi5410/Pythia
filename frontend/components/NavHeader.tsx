@@ -24,9 +24,6 @@ export default function NavHeader() {
     <header style={{
       borderBottom: `1px solid ${C.border}`,
       background: C.bg,
-      position: 'sticky' as const,
-      top: 0,
-      zIndex: 50,
     }}>
       {/* Top bar */}
       <div style={{
@@ -61,54 +58,37 @@ export default function NavHeader() {
         )}
       </div>
 
-      {/* Stage progress */}
-      <div style={{
-        padding: '0 40px 0',
-        display: 'flex',
-        gap: 0,
-      }}>
-        {STAGES.map((stage, i) => {
-          const isActive = i === currentIdx;
-          const isCompleted = i < currentIdx;
-          const isReachable = canNavigateTo(stage.id);
-
-          return (
-            <button
-              key={stage.id}
-              onClick={() => {
-                if (isReachable || isCompleted) router.push(stage.path);
-              }}
-              disabled={!isReachable && !isCompleted && !isActive}
-              style={{
-                padding: '10px 20px',
-                border: 'none',
-                borderBottom: isActive ? `2px solid ${C.accent}` : '2px solid transparent',
-                background: 'transparent',
-                cursor: (isReachable || isCompleted) ? 'pointer' : 'default',
-                fontFamily: mono,
-                fontSize: 12,
-                fontWeight: isActive ? 700 : 400,
-                color: isActive ? C.dark : isCompleted ? C.info : isReachable ? C.muted : C.border,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                transition: 'all 0.2s',
-                opacity: (!isReachable && !isCompleted && !isActive) ? 0.4 : 1,
-              }}
-            >
-              <span style={{ fontSize: 12 }}>{isCompleted ? '✓' : stage.icon}</span>
-              <span>{stage.label}</span>
-              {i < STAGES.length - 1 && (
-                <span style={{
-                  color: C.border, fontSize: 10, marginLeft: 8,
-                }}>
-                  →
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Stage progress — minimal breadcrumb, not tabs */}
+      {currentIdx > 0 && (
+        <div style={{
+          padding: '0 40px 8px',
+          fontFamily: mono,
+          fontSize: 11,
+          color: C.muted,
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+        }}>
+          {STAGES.slice(0, currentIdx + 1).map((stage, i) => (
+            <span key={stage.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {i > 0 && <span style={{ color: C.border }}>→</span>}
+              <span
+                onClick={() => {
+                  if (i < currentIdx && (canNavigateTo(stage.id) || i === 0)) router.push(stage.path);
+                }}
+                style={{
+                  cursor: i < currentIdx ? 'pointer' : 'default',
+                  color: i === currentIdx ? C.dark : C.info,
+                  fontWeight: i === currentIdx ? 600 : 400,
+                  textDecoration: i < currentIdx ? 'underline' : 'none',
+                }}
+              >
+                {stage.label}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
     </header>
   );
 }

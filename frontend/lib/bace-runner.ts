@@ -163,6 +163,43 @@ export async function runBACEStream(
             challenged_by: tc.challenger?.replace(/\s+/g, '-').toLowerCase() || '',
           }));
         }
+      // === New multi-round simulation events ===
+      } else if (eventType === 'sim_round') {
+        currentStep = 6;
+        liveLog.push(`━━ Round ${data.round}/${data.total} — ${data.active_hypotheses} active hypotheses ━━`);
+      } else if (eventType === 'sim_action') {
+        currentStep = 6;
+        const icon = data.action === 'CHALLENGE' ? '⚔' : data.action === 'SUPPORT' ? '✓' : data.action === 'REBUT' ? '↩' : data.action === 'CONCEDE' ? '✕' : data.action === 'PRESENT_EVIDENCE' ? '📄' : data.action === 'UPDATE_CONFIDENCE' ? '↕' : data.action === 'SYNTHESIZE' ? '⊕' : data.action === 'CONVERGED' ? '●' : '•';
+        const confDelta = data.confidence_after !== data.confidence_before && data.confidence_before > 0
+          ? ` (${data.confidence_after > data.confidence_before ? '+' : ''}${((data.confidence_after - data.confidence_before) * 100).toFixed(0)}%)`
+          : '';
+        liveLog.push(`${icon} [${data.agent_name}] ${data.action}${data.target_hyp ? ' → ' + data.target_hyp : ''}${confDelta}`);
+        if (data.content) liveLog.push(`  ${data.content.slice(0, 100)}`);
+
+        // Update divergence from challenges
+        if (data.action === 'CHALLENGE' && data.target_agent && data.agent) {
+          divergencePairs.push({
+            hypothesis_id: data.target_hyp || '',
+            proposed_by: data.target_agent || '',
+            challenged_by: data.agent || '',
+          });
+        }
+        // Update convergence from supports
+        if (data.action === 'SUPPORT' && data.target_hyp) {
+          const existing = convergenceGroups.get(data.target_hyp) || [];
+          if (!existing.includes(data.agent)) {
+            existing.push(data.agent);
+            convergenceGroups.set(data.target_hyp, existing);
+          }
+        }
+      } else if (eventType === 'sim_status') {
+        currentStep = 6;
+        // Status update — don't add to log, just update state
+      } else if (eventType === 'sim_complete') {
+        currentStep = 7;
+        liveLog.push(`Simulation complete: ${data.total_actions} actions over ${data.rounds_completed} rounds`);
+        liveLog.push(`${data.active_hypotheses} survived, ${data.conceded_hypotheses} conceded`);
+        if (data.convergence_groups > 0) liveLog.push(`${data.convergence_groups} convergence groups, ${data.divergence_pairs} unresolved conflicts`);
       } else if (eventType === 'scenarios') {
         currentStep = 7;
         const pc = (data.primary || []).length;
