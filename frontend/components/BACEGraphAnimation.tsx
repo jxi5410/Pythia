@@ -591,6 +591,27 @@ export default function BACEGraphAnimation({ baceState, graphState }: BACEGraphA
           </pattern>
           <rect width={W} height={H} fill="url(#grid)" />
 
+          {/* Scanning/radar animation when waiting for data */}
+          {nodes.length <= 1 && baceState.step <= 1 && (
+            <>
+              <circle cx={CX} cy={CY} r={60} fill="none" stroke={C.accent} strokeWidth={0.5} opacity={0.15}>
+                <animate attributeName="r" from="20" to="140" dur="3s" repeatCount="indefinite" />
+                <animate attributeName="opacity" from="0.3" to="0" dur="3s" repeatCount="indefinite" />
+              </circle>
+              <circle cx={CX} cy={CY} r={40} fill="none" stroke={C.accent} strokeWidth={0.5} opacity={0.15}>
+                <animate attributeName="r" from="20" to="140" dur="3s" begin="1s" repeatCount="indefinite" />
+                <animate attributeName="opacity" from="0.3" to="0" dur="3s" begin="1s" repeatCount="indefinite" />
+              </circle>
+              <circle cx={CX} cy={CY} r={20} fill="none" stroke={C.accent} strokeWidth={0.5} opacity={0.15}>
+                <animate attributeName="r" from="20" to="140" dur="3s" begin="2s" repeatCount="indefinite" />
+                <animate attributeName="opacity" from="0.3" to="0" dur="3s" begin="2s" repeatCount="indefinite" />
+              </circle>
+              <text x={CX} y={CY + 50} textAnchor="middle" fontSize={11} fontFamily={mono} fill={C.muted} opacity={0.6}>
+                Scanning causal landscape…
+              </text>
+            </>
+          )}
+
           {/* Edges */}
           {edges.map((edge, i) => {
             const src = nodeMap[edge.source];

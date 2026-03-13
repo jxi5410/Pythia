@@ -349,7 +349,9 @@ async def attribute_spike_streaming(
             return {"all": []}
 
     # Run both concurrently
-    ontology_task = asyncio.ensure_future(_run_in_thread(extract_causal_ontology, context, llm_strong))
+    # Use fast LLM for ontology at depth ≤2 (5-8s vs 27s with strong LLM)
+    ontology_llm = llm_strong if depth >= 3 else llm_fast
+    ontology_task = asyncio.ensure_future(_run_in_thread(extract_causal_ontology, context, ontology_llm))
     early_ev_task = asyncio.ensure_future(early_evidence())
 
     # Wait for ontology (the bottleneck)
