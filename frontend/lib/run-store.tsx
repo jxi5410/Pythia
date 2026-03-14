@@ -104,6 +104,12 @@ export interface BACEState {
   agentsActive: string[];
   debateLog: string[];
   counterfactualsTested: number;
+  currentStageKey: string;
+  currentStageLabel: string;
+  currentDetail: string;
+  waitingOn: string | null;
+  elapsedSeconds: number;
+  lastBackendEventAtMs: number | null;
 }
 
 // Stage progression
@@ -154,6 +160,12 @@ export interface RunState {
 
 const defaultBACEState: BACEState = {
   step: 0, entities: [], agentsActive: [], debateLog: [], counterfactualsTested: 0,
+  currentStageKey: 'preparing_run',
+  currentStageLabel: 'Preparing BACE run',
+  currentDetail: 'Connecting to the attribution stream.',
+  waitingOn: null,
+  elapsedSeconds: 0,
+  lastBackendEventAtMs: null,
 };
 
 const defaultGraphState: BACEGraphState = {

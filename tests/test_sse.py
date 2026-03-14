@@ -851,3 +851,120 @@ class TestLegacyCompat:
         frames = _parse_sse_frames(raw)
         last_frame = frames[-1]
         assert last_frame["event"] == "run_completed"
+
+
+def test_create_run_fails_fast_for_invalid_input(monkeypatch):
+    from fastapi.testclient import TestClient
+    from src.api.server import app
+
+    monkeypatch.setenv("PYTHIA_TESTING", "1")
+    client = TestClient(app)
+
+    resp = client.post("/api/runs", json={
+        "market_title": "",
+        "timestamp": "2025-01-01T00:00:00Z",
+        "direction": "sideways",
+        "magnitude": 0.1,
+        "price_before": 0.4,
+        "price_after": 0.5,
+    })
+
+    assert resp.status_code == 422
+    assert "market_title" in resp.text or "direction" in resp.text
+
+
+def test_orchestrator_reuses_existing_run_id_and_emits_early_progress():
+    from src.core.run_orchestrator import RunOrchestrator
+
+    repo = RunRepository(init_db(":memory:", check_same_thread=False))
+    spike_event = SpikeEvent(
+        market_id=uuid4(),
+        spike_type=SpikeType.UP,
+        magnitude=0.25,
+        threshold_used=0.1,
+        metadata={"market_title": "Test Market", "timestamp": "2025-01-15T12:00:00Z"},
+    )
+    existing = AttributionRun(
+        spike_event_id=spike_event.id,
+        market_id=spike_event.market_id,
+        status=RunStatus.CREATED,
+        metadata={"market_title": "Test Market", "spike_event": spike_event.model_dump(mode="json")},
+    )
+    repo.create_run(existing)
+
+    async def delayed_stream(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        yield {"step": "result", "data": {
+            "agent_hypotheses": [],
+            "attribution": {"most_likely_cause": "No cause survived"},
+            "elapsed_seconds": 0.01,
+            "bace_metadata": {},
+        }}
+
+    captured: list[SSEEvent] = []
+
+    async def on_event(evt: SSEEvent) -> None:
+        captured.append(evt)
+
+    orch = RunOrchestrator(repo, heartbeat_interval_seconds=0.01)
+    with patch("src.core.bace_parallel.attribute_spike_streaming", delayed_stream):
+        result = asyncio.run(orch.execute_run(
+            market_id=str(existing.market_id),
+            spike_event=spike_event,
+            on_event=on_event,
+            run_id=str(existing.id),
+        ))
+
+    assert result.id == existing.id
+    assert captured
+    assert captured[0].event_type == SSEEventType.RUN_STARTED
+    assert captured[0].payload["message"] == "Preparing BACE run"
+    assert all(evt.run_id == existing.id for evt in captured)
+
+
+def test_orchestrator_heartbeat_surfaces_during_slow_first_stage():
+    from src.core.run_orchestrator import RunOrchestrator
+
+    repo = RunRepository(init_db(":memory:", check_same_thread=False))
+    spike_event = SpikeEvent(
+        market_id=uuid4(),
+        spike_type=SpikeType.UP,
+        magnitude=0.25,
+        threshold_used=0.1,
+        metadata={"market_title": "Test Market", "timestamp": "2025-01-15T12:00:00Z"},
+    )
+
+    async def slow_stream(*args, **kwargs):
+        await asyncio.sleep(0.03)
+        yield {"step": "heartbeat", "data": {
+            "status": "building_spike_context",
+            "phase": "building_spike_context",
+            "phase_label": "Building spike context",
+            "message": "Scanning recent market context",
+            "detail": "Waiting for the first model response.",
+            "waiting_on": "model_response",
+            "elapsed_seconds": 0.03,
+        }}
+        yield {"step": "result", "data": {
+            "agent_hypotheses": [],
+            "attribution": {"most_likely_cause": "No cause survived"},
+            "elapsed_seconds": 0.03,
+            "bace_metadata": {},
+        }}
+
+    captured: list[SSEEvent] = []
+
+    async def on_event(evt: SSEEvent) -> None:
+        captured.append(evt)
+
+    orch = RunOrchestrator(repo, heartbeat_interval_seconds=0.01)
+    with patch("src.core.bace_parallel.attribute_spike_streaming", slow_stream):
+        asyncio.run(orch.execute_run(
+            market_id=str(spike_event.market_id),
+            spike_event=spike_event,
+            on_event=on_event,
+        ))
+
+    heartbeat_events = [evt for evt in captured if evt.event_type == SSEEventType.HEARTBEAT]
+    assert heartbeat_events
+    assert any(evt.payload.get("phase") == "building_spike_context" for evt in heartbeat_events)

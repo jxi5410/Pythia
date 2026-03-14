@@ -35,6 +35,7 @@ Endpoints:
 
 import asyncio
 import collections
+import math
 import json
 import logging
 import os
@@ -361,6 +362,21 @@ class CreateRunRequest(BaseModel):
     volume_at_spike: float = 0.0
     depth: int = 2
 
+
+def _validate_create_run_request(req: CreateRunRequest) -> None:
+    if not req.market_title.strip():
+        raise HTTPException(status_code=422, detail="market_title must not be empty")
+    if req.direction not in {"up", "down"}:
+        raise HTTPException(status_code=422, detail="direction must be 'up' or 'down'")
+    if not math.isfinite(req.magnitude) or req.magnitude < 0:
+        raise HTTPException(status_code=422, detail="magnitude must be a finite non-negative number")
+    if not math.isfinite(req.price_before) or not math.isfinite(req.price_after):
+        raise HTTPException(status_code=422, detail="price_before and price_after must be finite numbers")
+    if not math.isfinite(req.volume_at_spike) or req.volume_at_spike < 0:
+        raise HTTPException(status_code=422, detail="volume_at_spike must be a finite non-negative number")
+    if req.depth not in {1, 2, 3}:
+        raise HTTPException(status_code=422, detail="depth must be 1, 2, or 3")
+
 class RunCreatedResponse(BaseModel):
     run_id: str
     status: str
@@ -381,6 +397,7 @@ class RunStatusResponse(BaseModel):
 async def create_run(req: CreateRunRequest):
     """Create a new attribution run. Returns run_id; stream via /stream."""
     repo = _get_repo()
+    _validate_create_run_request(req)
 
     from src.core.models import AttributionRun
     spike_event = SpikeEvent(
@@ -711,6 +728,7 @@ async def stream_run(run_id: str, request: Request):
             async def run_orchestrator():
                 try:
                     await orch.execute_run(
+                        run_id=run_id,
                         market_id=str(run.market_id),
                         spike_event=spike_event,
                         on_event=on_event,

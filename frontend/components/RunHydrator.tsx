@@ -81,7 +81,7 @@ export default function RunHydrator({ runId, children }: RunHydratorProps) {
         }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         <div style={{ fontFamily: mono, fontSize: 12, color: C.muted }}>
-          Loading run {runId.slice(0, 8)}...
+          Connecting to live run {runId.slice(0, 8)}...
         </div>
       </div>
     </div>

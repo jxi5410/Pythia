@@ -33,6 +33,13 @@ export interface EventAccumulator {
   liveEntities: string[];
   liveAgents: string[];
   liveLog: string[];
+  currentStageKey: string;
+  currentStageLabel: string;
+  currentDetail: string;
+  waitingOn: string | null;
+  elapsedSeconds: number;
+  lastBackendEventAtMs: number | null;
+  lastHeartbeatSignature: string | null;
   ontologyEntities: OntologyEntity[];
   ontologyRelationships: OntologyRelationship[];
   agents: AgentInfo[];
@@ -51,6 +58,13 @@ export function createAccumulator(): EventAccumulator {
     liveEntities: [],
     liveAgents: [],
     liveLog: [],
+    currentStageKey: 'preparing_run',
+    currentStageLabel: 'Preparing BACE run',
+    currentDetail: 'Connecting to the attribution stream.',
+    waitingOn: null,
+    elapsedSeconds: 0,
+    lastBackendEventAtMs: null,
+    lastHeartbeatSignature: null,
     ontologyEntities: [],
     ontologyRelationships: [],
     agents: [],
@@ -75,6 +89,13 @@ export function seedAccumulator(
     liveEntities: [...baceState.entities],
     liveAgents: [...baceState.agentsActive],
     liveLog: [...baceState.debateLog],
+    currentStageKey: baceState.currentStageKey,
+    currentStageLabel: baceState.currentStageLabel,
+    currentDetail: baceState.currentDetail,
+    waitingOn: baceState.waitingOn,
+    elapsedSeconds: baceState.elapsedSeconds,
+    lastBackendEventAtMs: baceState.lastBackendEventAtMs,
+    lastHeartbeatSignature: null,
     ontologyEntities: [...graphState.ontologyEntities],
     ontologyRelationships: [...graphState.ontologyRelationships],
     agents: [...graphState.agents],
@@ -94,6 +115,12 @@ function emitState(acc: EventAccumulator, callbacks: BACECallbacks) {
     agentsActive: [...acc.liveAgents],
     debateLog: acc.liveLog.slice(-14),
     counterfactualsTested: acc.currentStep >= 7 ? 1 : 0,
+    currentStageKey: acc.currentStageKey,
+    currentStageLabel: acc.currentStageLabel,
+    currentDetail: acc.currentDetail,
+    waitingOn: acc.waitingOn,
+    elapsedSeconds: acc.elapsedSeconds,
+    lastBackendEventAtMs: acc.lastBackendEventAtMs,
   });
   callbacks.onGraphState({
     ontologyEntities: [...acc.ontologyEntities],
@@ -117,12 +144,34 @@ function normalizeEvent(
 ): { eventType: string; data: any; sequence: number | null } {
   if (parsed.event_type !== undefined && parsed.payload !== undefined) {
     return {
-      eventType: parsed.event_type,
+      eventType: parsed.payload?.progress_kind || parsed.event_type,
       data: parsed.payload,
       sequence: parsed.sequence ?? null,
     };
   }
   return { eventType: rawEventType, data: parsed, sequence: null };
+}
+
+function updateProgress(
+  acc: EventAccumulator,
+  stageKey: string,
+  stageLabel: string,
+  detail: string,
+  elapsedSeconds = acc.elapsedSeconds,
+  waitingOn: string | null = acc.waitingOn,
+) {
+  acc.currentStageKey = stageKey;
+  acc.currentStageLabel = stageLabel;
+  acc.currentDetail = detail;
+  acc.elapsedSeconds = elapsedSeconds;
+  acc.waitingOn = waitingOn;
+  acc.lastBackendEventAtMs = Date.now();
+}
+
+function appendLogOnce(acc: EventAccumulator, line: string) {
+  if (!line) return;
+  if (acc.liveLog[acc.liveLog.length - 1] === line) return;
+  acc.liveLog.push(line);
 }
 
 /**
@@ -139,11 +188,28 @@ function applyEvent(
 ): 'continue' | 'terminal_error' | 'skip' {
   if (eventType === 'context') {
     acc.currentStep = 0;
-    acc.liveLog.push(`Category: ${data.category || 'general'}`);
+    updateProgress(
+      acc,
+      'context',
+      data.phase_label || 'Building spike context',
+      data.detail || data.message || 'Scanning recent market context.',
+      data.elapsed_seconds ?? acc.elapsedSeconds,
+      data.waiting_on || null,
+    );
+    appendLogOnce(acc, data.message || 'Scanning recent market context');
+    appendLogOnce(acc, `Category: ${data.category || 'general'}`);
     if (data.entities) for (const e of data.entities) if (!acc.liveEntities.includes(e)) acc.liveEntities.push(e);
   } else if (eventType === 'ontology') {
     acc.currentStep = 1;
-    acc.liveLog.push(`Ontology: ${data.entity_count} entities, ${data.relationship_count} rels`);
+    updateProgress(
+      acc,
+      'ontology',
+      data.phase_label || 'Building candidate causal factors',
+      data.detail || data.message || 'Building candidate causal factors.',
+      data.elapsed_seconds ?? acc.elapsedSeconds,
+      data.waiting_on || null,
+    );
+    appendLogOnce(acc, `Ontology: ${data.entity_count} entities, ${data.relationship_count} rels`);
     if (data.entities) {
       for (const name of data.entities) if (!acc.liveEntities.includes(name)) acc.liveEntities.push(name);
       acc.ontologyEntities = data.entities.map((name: string, i: number) => ({
@@ -162,34 +228,49 @@ function applyEvent(
         type: r.relationship_type || r.type || 'related', strength: r.strength || 0.5,
       }));
     }
-    acc.liveLog.push(`Generated ${data.search_queries || 0} search queries`);
+    appendLogOnce(acc, `Generated ${data.search_queries || 0} search queries`);
   } else if (eventType === 'evidence') {
     acc.currentStep = 2;
-    acc.liveLog.push(`News evidence: ${data.count} candidates`);
+    updateProgress(acc, 'evidence', 'Comparing supporting vs conflicting evidence', 'Comparing supporting vs conflicting evidence.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `News evidence: ${data.count} candidates`);
+  } else if (eventType === 'run_started') {
+    updateProgress(
+      acc,
+      data.phase || 'preparing_run',
+      data.phase_label || 'Preparing BACE run',
+      data.detail || data.message || 'Preparing BACE run.',
+      data.elapsed_seconds ?? 0,
+      data.waiting_on || null,
+    );
+    appendLogOnce(acc, data.message || 'Preparing BACE run');
   } else if (eventType === 'agents') {
     acc.currentStep = 3;
+    updateProgress(acc, 'agents', 'Building candidate causal factors', 'Spawning specialist agents.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     acc.agents = (data.agents || []).map((a: any) => ({
       id: a.id, name: a.name, tier: a.tier || 1, domain: a.domain || '',
     }));
     for (const a of acc.agents) if (!acc.liveAgents.includes(a.id)) acc.liveAgents.push(a.id);
-    acc.liveLog.push(`Spawned ${data.count || acc.agents.length} agents`);
+    appendLogOnce(acc, `Spawned ${data.count || acc.agents.length} agents`);
   } else if (eventType === 'domain_evidence') {
     acc.currentStep = 4;
-    acc.liveLog.push(`Domain evidence: ${data.count} items`);
+    updateProgress(acc, 'domain_evidence', 'Comparing supporting vs conflicting evidence', 'Gathering domain-specific evidence.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `Domain evidence: ${data.count} items`);
   } else if (eventType === 'proposal') {
     acc.currentStep = 5;
+    updateProgress(acc, 'proposal', 'Asking agents to challenge the lead narrative', 'Reviewing agent proposals.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     const agentName = acc.agents.find(a => a.id === data.agent)?.name || data.agent || 'Agent';
     const hyps = data.hypotheses || [];
     acc.proposals.set(data.agent, hyps.map((h: any) => ({ cause: h.cause || '', confidence: h.confidence || 0 })));
     for (const h of hyps) {
-      acc.liveLog.push(`\u27EB ${agentName}`);
-      acc.liveLog.push(`  "${(h.cause || '').slice(0, 90)}\u2026" \u2014 ${Math.round((h.confidence || 0) * 100)}%`);
+      appendLogOnce(acc, `\u27EB ${agentName}`);
+      appendLogOnce(acc, `  "${(h.cause || '').slice(0, 90)}\u2026" \u2014 ${Math.round((h.confidence || 0) * 100)}%`);
     }
   } else if (eventType === 'interaction') {
     acc.currentStep = 6;
+    updateProgress(acc, 'interaction', 'Asking agents to challenge the lead narrative', 'Comparing supporting vs conflicting evidence.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     const stances = data.stances || {};
-    acc.liveLog.push(`Interaction: ${stances.support || 0} support, ${stances.challenge || 0} challenges`);
-    if (data.convergence_groups) acc.liveLog.push(`Convergence: ${data.convergence_groups} groups`);
+    appendLogOnce(acc, `Interaction: ${stances.support || 0} support, ${stances.challenge || 0} challenges`);
+    if (data.convergence_groups) appendLogOnce(acc, `Convergence: ${data.convergence_groups} groups`);
     if (data.convergence_group_details) acc.convergenceGroups = new Map(Object.entries(data.convergence_group_details));
     if (data.top_challenges) {
       acc.divergencePairs = data.top_challenges.map((tc: any) => ({
@@ -200,15 +281,17 @@ function applyEvent(
     }
   } else if (eventType === 'sim_round') {
     acc.currentStep = 6;
-    acc.liveLog.push(`\u2501\u2501 Round ${data.round}/${data.total} \u2014 ${data.active_hypotheses} active hypotheses \u2501\u2501`);
+    updateProgress(acc, 'sim_round', 'Asking agents to challenge the lead narrative', 'Running the agent challenge round.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `\u2501\u2501 Round ${data.round}/${data.total} \u2014 ${data.active_hypotheses} active hypotheses \u2501\u2501`);
   } else if (eventType === 'sim_action') {
     acc.currentStep = 6;
+    updateProgress(acc, 'sim_action', 'Asking agents to challenge the lead narrative', 'Processing agent actions.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     const icon = data.action === 'CHALLENGE' ? '\u2694' : data.action === 'SUPPORT' ? '\u2713' : data.action === 'REBUT' ? '\u21A9' : data.action === 'CONCEDE' ? '\u2715' : data.action === 'PRESENT_EVIDENCE' ? '\uD83D\uDCC4' : data.action === 'UPDATE_CONFIDENCE' ? '\u2195' : data.action === 'SYNTHESIZE' ? '\u2295' : data.action === 'CONVERGED' ? '\u25CF' : '\u2022';
     const confDelta = data.confidence_after !== data.confidence_before && data.confidence_before > 0
       ? ` (${data.confidence_after > data.confidence_before ? '+' : ''}${((data.confidence_after - data.confidence_before) * 100).toFixed(0)}%)`
       : '';
-    acc.liveLog.push(`${icon} [${data.agent_name}] ${data.action}${data.target_hyp ? ' \u2192 ' + data.target_hyp : ''}${confDelta}`);
-    if (data.content) acc.liveLog.push(`  ${data.content.slice(0, 100)}`);
+    appendLogOnce(acc, `${icon} [${data.agent_name}] ${data.action}${data.target_hyp ? ' \u2192 ' + data.target_hyp : ''}${confDelta}`);
+    if (data.content) appendLogOnce(acc, `  ${data.content.slice(0, 100)}`);
     if (data.action === 'CHALLENGE' && data.target_agent && data.agent) {
       acc.divergencePairs.push({
         hypothesis_id: data.target_hyp || '',
@@ -225,43 +308,81 @@ function applyEvent(
     }
   } else if (eventType === 'sim_status') {
     acc.currentStep = 6;
+    updateProgress(acc, 'sim_status', 'Asking agents to challenge the lead narrative', data.detail || data.message || 'Still processing evidence.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
   } else if (eventType === 'sim_complete') {
     acc.currentStep = 7;
-    acc.liveLog.push(`Simulation complete: ${data.total_actions} actions over ${data.rounds_completed} rounds`);
-    acc.liveLog.push(`${data.active_hypotheses} survived, ${data.conceded_hypotheses} conceded`);
-    if (data.convergence_groups > 0) acc.liveLog.push(`${data.convergence_groups} convergence groups, ${data.divergence_pairs} unresolved conflicts`);
+    updateProgress(acc, 'sim_complete', 'Comparing supporting vs conflicting evidence', 'Agent review complete.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `Simulation complete: ${data.total_actions} actions over ${data.rounds_completed} rounds`);
+    appendLogOnce(acc, `${data.active_hypotheses} survived, ${data.conceded_hypotheses} conceded`);
+    if (data.convergence_groups > 0) appendLogOnce(acc, `${data.convergence_groups} convergence groups, ${data.divergence_pairs} unresolved conflicts`);
   } else if (eventType === 'scenarios') {
     acc.currentStep = 7;
-    const pc = (data.primary || []).length;
-    const ac = (data.alternative || []).length;
-    const dc = (data.dismissed || []).length;
-    acc.scenarioSummary = { total: data.total || 0, primary: pc, alternative: ac, dismissed: dc };
-    acc.liveLog.push(`Scenarios: ${pc} primary, ${ac} alternative, ${dc} dismissed`);
-    acc.liveScenarios = [
-      ...(data.primary || []).map((s: any) => ({ ...s, tier: 'primary' as const })),
-      ...(data.alternative || []).map((s: any) => ({ ...s, tier: 'alternative' as const })),
-      ...(data.dismissed || []).map((s: any) => ({ ...s, tier: 'dismissed' as const })),
-    ];
+    updateProgress(acc, 'scenarios', 'Comparing supporting vs conflicting evidence', 'Clustering scenarios.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    if (data.title && data.tier) {
+      appendLogOnce(acc, `Scenario created: ${data.title} (${data.tier})`);
+    } else {
+      const pc = (data.primary || []).length;
+      const ac = (data.alternative || []).length;
+      const dc = (data.dismissed || []).length;
+      acc.scenarioSummary = { total: data.total || 0, primary: pc, alternative: ac, dismissed: dc };
+      appendLogOnce(acc, `Scenarios: ${pc} primary, ${ac} alternative, ${dc} dismissed`);
+      acc.liveScenarios = [
+        ...(data.primary || []).map((s: any) => ({ ...s, tier: 'primary' as const })),
+        ...(data.alternative || []).map((s: any) => ({ ...s, tier: 'alternative' as const })),
+        ...(data.dismissed || []).map((s: any) => ({ ...s, tier: 'dismissed' as const })),
+      ];
+    }
   } else if (eventType === 'graph_update') {
+    updateProgress(acc, 'graph_update', 'Assembling attribution graph', 'Assembling attribution graph.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     acc.graphStats = { entities: data.entities || 0, relationships: data.relationships || 0, facts: data.facts || 0 };
-    acc.liveLog.push(`Graph memory: ${data.entities} entities, ${data.relationships} rels`);
+    appendLogOnce(acc, `Graph memory: ${data.entities} entities, ${data.relationships} rels`);
   } else if (eventType === 'debate') {
     acc.currentStep = 6;
-    acc.liveLog.push(`Debate round ${data.round}: ${data.surviving} surviving`);
+    updateProgress(acc, 'debate', 'Asking agents to challenge the lead narrative', 'Running debate rounds.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `Debate round ${data.round}: ${data.surviving} surviving`);
   } else if (eventType === 'counterfactual') {
     acc.currentStep = 7;
-    acc.liveLog.push(`Counterfactual: ${data.tested} tested`);
+    updateProgress(acc, 'counterfactual', 'Comparing supporting vs conflicting evidence', 'Testing counterfactuals.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
+    appendLogOnce(acc, `Counterfactual: ${data.tested} tested`);
   } else if (eventType === 'result') {
-    acc.finalResult = data;
+    acc.finalResult = data.final_result || data;
+    updateProgress(acc, 'result', 'Assembling attribution graph', 'Finalizing attribution output.', data.elapsed_seconds ?? acc.elapsedSeconds, data.waiting_on || null);
     return 'skip'; // don't emit for result
   } else if (eventType === 'done' || eventType === 'run_completed') {
     return 'skip'; // terminal — handled by caller
   } else if (eventType === 'heartbeat') {
-    return 'skip';
+    updateProgress(
+      acc,
+      data.phase || acc.currentStageKey || 'still_working',
+      data.phase_label || acc.currentStageLabel || 'Still working',
+      data.detail || data.message || 'Still processing evidence.',
+      data.elapsed_seconds ?? data.elapsed ?? acc.elapsedSeconds,
+      data.waiting_on || acc.waitingOn,
+    );
+    const heartbeatSignature = `${acc.currentStageKey}|${acc.currentDetail}|${acc.waitingOn || ''}|${Math.floor(acc.elapsedSeconds)}`;
+    if (acc.lastHeartbeatSignature !== heartbeatSignature) {
+      appendLogOnce(acc, data.message || 'Still working');
+      if (data.waiting_on === 'model_response') {
+        appendLogOnce(acc, 'Waiting for model response');
+      }
+      acc.lastHeartbeatSignature = heartbeatSignature;
+    }
   } else if (eventType === 'error') {
     // Notify callback, then signal terminal to caller
     callbacks.onError(data.error || 'Backend error');
     return 'terminal_error';
+  } else {
+    if (data?.phase_label || data?.message || data?.detail) {
+      updateProgress(
+        acc,
+        data.phase || eventType,
+        data.phase_label || acc.currentStageLabel,
+        data.detail || data.message || acc.currentDetail,
+        data.elapsed_seconds ?? acc.elapsedSeconds,
+        data.waiting_on || acc.waitingOn,
+      );
+      if (data.message) appendLogOnce(acc, data.message);
+    }
   }
 
   emitState(acc, callbacks);

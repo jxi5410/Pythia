@@ -43,6 +43,8 @@ from src.core.persistence import RunRepository
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 5.0
+
 # ── Stage ordering (for resume) ──────────────────────────────────────
 
 STAGE_ORDER = [
@@ -321,9 +323,15 @@ class RunOrchestrator:
     periodically, and supports resume from the last completed stage.
     """
 
-    def __init__(self, db: RunRepository, bace_depth: int = 2) -> None:
+    def __init__(
+        self,
+        db: RunRepository,
+        bace_depth: int = 2,
+        heartbeat_interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    ) -> None:
         self._db = db
         self._bace_depth = bace_depth
+        self._heartbeat_interval_seconds = heartbeat_interval_seconds
         # Lazy import to avoid circular dependency at module level
         from src.core.evidence_ledger import EvidenceLedger
         from src.core.graph_manager import GraphManager
@@ -339,15 +347,41 @@ class RunOrchestrator:
         market_id: str,
         spike_event: SpikeEvent,
         on_event: Callable[[SSEEvent], Awaitable[None]],
+        run_id: str | UUID | None = None,
     ) -> AttributionRun:
         """Execute a full BACE attribution run with persistence and SSE."""
-        run = AttributionRun(
-            spike_event_id=spike_event.id,
-            market_id=UUID(market_id) if isinstance(market_id, str) else market_id,
-            status=RunStatus.CREATED,
-            bace_depth=self._bace_depth,
-        )
-        self._db.create_run(run)
+        existing_run = None
+        if run_id is not None:
+            existing_run = self._db.get_run(str(run_id))
+            if existing_run is None:
+                raise ValueError(f"Run {run_id} not found")
+
+        if existing_run is not None:
+            run = existing_run.model_copy(deep=True)
+            merged_metadata = dict(run.metadata)
+            merged_metadata.setdefault("spike_event", spike_event.model_dump(mode="json"))
+            merged_metadata.setdefault("market_title", spike_event.metadata.get("market_title", ""))
+            run = run.model_copy(update={
+                "market_id": UUID(market_id) if isinstance(market_id, str) else market_id,
+                "spike_event_id": spike_event.id,
+                "status": RunStatus.CREATED,
+                "bace_depth": self._bace_depth,
+                "metadata": merged_metadata,
+            })
+            self._db.update_run_status(str(run.id), RunStatus.CREATED)
+            self._db.update_run_metadata(str(run.id), run.metadata)
+        else:
+            run = AttributionRun(
+                spike_event_id=spike_event.id,
+                market_id=UUID(market_id) if isinstance(market_id, str) else market_id,
+                status=RunStatus.CREATED,
+                bace_depth=self._bace_depth,
+                metadata={
+                    "market_title": spike_event.metadata.get("market_title", ""),
+                    "spike_event": spike_event.model_dump(mode="json"),
+                },
+            )
+            self._db.create_run(run)
 
         seq = _SequenceCounter()
         run_id = run.id
@@ -357,6 +391,12 @@ class RunOrchestrator:
             "run_id": str(run_id),
             "market_id": market_id,
             "spike_event_id": str(spike_event.id),
+            "progress_kind": "run_started",
+            "phase": "preparing_run",
+            "phase_label": "Preparing BACE run",
+            "message": "Preparing BACE run",
+            "detail": "Validating the spike and starting the attribution pipeline.",
+            "elapsed_seconds": 0.0,
         })
 
         try:
@@ -477,8 +517,15 @@ class RunOrchestrator:
                 ):
                     continue
 
-                # Skip heartbeats from underlying pipeline (we emit our own)
                 if step == "heartbeat":
+                    await self._emit(
+                        on_event, run_id, current_stage,
+                        SSEEventType.HEARTBEAT, seq,
+                        {
+                            **data,
+                            "progress_kind": "heartbeat",
+                        },
+                    )
                     continue
 
                 # ── Process by step type ──────────────────────────
@@ -486,7 +533,10 @@ class RunOrchestrator:
                 if step == "context":
                     await self._emit(
                         on_event, run_id, "market_snapshot_complete",
-                        SSEEventType.RUN_STARTED, seq, data,
+                        SSEEventType.RUN_STARTED, seq, {
+                            **data,
+                            "progress_kind": "context",
+                        },
                     )
 
                 elif step == "ontology":
@@ -506,20 +556,28 @@ class RunOrchestrator:
                             "nodes": len(nodes),
                             "edges": len(edges),
                             "search_queries": ontology_payload["search_queries"],
+                            "full_entities": ontology_payload["entities"],
+                            "full_relationships": ontology_payload["relationships"],
+                            "entity_count": len(ontology_payload["entities"]),
+                            "relationship_count": len(ontology_payload["relationships"]),
+                            "progress_kind": "ontology",
                         },
                     )
 
                 elif step == "evidence":
                     await self._emit(
                         on_event, run_id, "attribution_started",
-                        SSEEventType.EVIDENCE_ADDED, seq, data,
+                        SSEEventType.EVIDENCE_ADDED, seq, {
+                            **data,
+                            "progress_kind": "evidence",
+                        },
                     )
 
                 elif step == "domain_evidence":
                     await self._emit(
                         on_event, run_id, "attribution_started",
                         SSEEventType.EVIDENCE_ADDED, seq,
-                        {"domain": True, **data},
+                        {"domain": True, **data, "progress_kind": "domain_evidence"},
                     )
 
                 elif step == "proposal":
@@ -540,6 +598,8 @@ class RunOrchestrator:
                         SSEEventType.EVIDENCE_ADDED, seq, {
                             "agent": agent_name,
                             "count": ingested,
+                            "hypotheses": data.get("hypotheses", []),
+                            "progress_kind": "proposal",
                         },
                     )
 
@@ -551,7 +611,10 @@ class RunOrchestrator:
 
                     await self._emit(
                         on_event, run_id, "attribution_streaming",
-                        SSEEventType.AGENT_ACTION, seq, data,
+                        SSEEventType.AGENT_ACTION, seq, {
+                            **data,
+                            "progress_kind": "sim_action",
+                        },
                     )
 
                     # Checkpoint every 10 actions
@@ -565,13 +628,19 @@ class RunOrchestrator:
                 elif step == "sim_round":
                     await self._emit(
                         on_event, run_id, "attribution_streaming",
-                        SSEEventType.AGENT_ACTION, seq, data,
+                        SSEEventType.AGENT_ACTION, seq, {
+                            **data,
+                            "progress_kind": "sim_round",
+                        },
                     )
 
                 elif step == "sim_status":
                     await self._emit(
                         on_event, run_id, "attribution_streaming",
-                        SSEEventType.AGENT_ACTION, seq, data,
+                        SSEEventType.AGENT_ACTION, seq, {
+                            **data,
+                            "progress_kind": "sim_status",
+                        },
                     )
 
                 elif step == "sim_complete":
@@ -583,7 +652,7 @@ class RunOrchestrator:
                     await self._emit(
                         on_event, run_id, "attribution_streaming",
                         SSEEventType.CHECKPOINT_SAVED, seq,
-                        {"stage": "attribution_streaming"},
+                        {"stage": "attribution_streaming", "progress_kind": "sim_complete", **data},
                     )
 
                     # Cluster persisted actions into formal Scenario
@@ -614,7 +683,10 @@ class RunOrchestrator:
                 elif step == "interaction":
                     await self._emit(
                         on_event, run_id, "attribution_streaming",
-                        SSEEventType.AGENT_ACTION, seq, data,
+                        SSEEventType.AGENT_ACTION, seq, {
+                            **data,
+                            "progress_kind": "interaction",
+                        },
                     )
 
                 elif step == "scenarios":
@@ -632,7 +704,11 @@ class RunOrchestrator:
                             await self._emit(
                                 on_event, run_id, "scenario_clustering_complete",
                                 SSEEventType.SCENARIO_CREATED, seq,
-                                {"title": sc_model.title, "tier": tier},
+                                {
+                                    "title": sc_model.title,
+                                    "tier": tier,
+                                    "progress_kind": "scenarios",
+                                },
                             )
 
                     await self._checkpoint(
@@ -648,7 +724,10 @@ class RunOrchestrator:
 
                     await self._emit(
                         on_event, run_id, "graph_persisted",
-                        SSEEventType.GRAPH_DELTA, seq, data,
+                        SSEEventType.GRAPH_DELTA, seq, {
+                            **data,
+                            "progress_kind": "graph_update",
+                        },
                     )
                     await self._checkpoint(run_id, "graph_persisted", data)
 
@@ -675,6 +754,8 @@ class RunOrchestrator:
                             "run_id": str(run_id),
                             "status": "completed",
                             "elapsed_seconds": data.get("elapsed_seconds"),
+                            "progress_kind": "result",
+                            "final_result": data,
                         },
                     )
 
@@ -731,13 +812,20 @@ class RunOrchestrator:
     ) -> None:
         """Emit heartbeat SSEEvents every 5 seconds until cancelled."""
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(self._heartbeat_interval_seconds)
             event = SSEEvent(
                 run_id=run_id,
                 stage="heartbeat",
                 event_type=SSEEventType.HEARTBEAT,
                 sequence=seq.next(),
-                payload={"ts": _utcnow().isoformat()},
+                payload={
+                    "ts": _utcnow().isoformat(),
+                    "progress_kind": "heartbeat",
+                    "phase": "still_working",
+                    "phase_label": "Still working",
+                    "message": "Still processing evidence",
+                    "detail": "No new stage transition yet.",
+                },
             )
             self._db.save_sse_event(event)
             await on_event(event)

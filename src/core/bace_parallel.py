@@ -318,15 +318,82 @@ async def attribute_spike_streaming(
         from .llm_integration import opus_call
         llm_strong = opus_call
 
-    # Step 1: Build context
-    from .spike_context import build_spike_context
-    context = build_spike_context(spike, all_recent_spikes or [], entity_llm=llm_strong)
-    category = context.get("category", "general")
+    # Step 1: Build context. This used to block before the first yield because
+    # entity extraction and market classification both called the LLM
+    # synchronously. Run them concurrently and emit truthful heartbeats while
+    # waiting.
+    from datetime import timedelta
+    from .spike_context import _parse_naive, find_concurrent_spikes
+    from .market_classifier import classify_market, extract_entities_llm
+
+    title = getattr(spike, "market_title", "") or ""
+    ts_raw = getattr(spike, "timestamp", "")
+    spike_ts = _parse_naive(ts_raw)
+    correlated = find_concurrent_spikes(spike, all_recent_spikes or [], window_hours=2)
+
+    yield {"step": "heartbeat", "data": {
+        "status": "preparing_context",
+        "phase": "preparing_context",
+        "phase_label": "Building spike context",
+        "message": "Scanning recent market context",
+        "detail": "Extracting entities and classifying the market before evidence search.",
+        "waiting_on": "model_response",
+        "elapsed_seconds": round(time.time() - start_time, 1),
+    }}
+
+    entities_task = asyncio.create_task(_run_in_thread(extract_entities_llm, title, llm_strong))
+    category_task = asyncio.create_task(_run_in_thread(classify_market, title, llm_strong))
+    context_heartbeat_interval = 1.5
+    while not entities_task.done() or not category_task.done():
+        await asyncio.sleep(context_heartbeat_interval)
+        pending = []
+        if not entities_task.done():
+            pending.append("entity_extraction")
+        if not category_task.done():
+            pending.append("market_classification")
+        if pending:
+            yield {"step": "heartbeat", "data": {
+                "status": "building_spike_context",
+                "phase": "building_spike_context",
+                "phase_label": "Building spike context",
+                "message": "Scanning recent market context",
+                "detail": "Waiting for the first model response.",
+                "waiting_on": ",".join(pending),
+                "elapsed_seconds": round(time.time() - start_time, 1),
+            }}
+
+    entities = await entities_task
+    category = await category_task
+    context = {
+        "market_title": title,
+        "category": category,
+        "entities": entities,
+        "spike": {
+            "direction": getattr(spike, "direction", "up"),
+            "magnitude": getattr(spike, "magnitude", 0.0),
+            "timestamp": spike_ts.isoformat() if hasattr(spike_ts, "isoformat") else str(spike_ts),
+            "price_before": getattr(spike, "price_before", 0.0),
+            "price_after": getattr(spike, "price_after", 0.0),
+            "volume": getattr(spike, "volume_at_spike", 0.0),
+        },
+        "temporal_window": {
+            "start": (spike_ts - timedelta(hours=6)).isoformat(),
+            "end": (spike_ts + timedelta(hours=1)).isoformat(),
+        },
+        "correlated_spikes": correlated,
+        "is_macro": len(correlated) >= 2,
+        "market_id": getattr(spike, "market_id", ""),
+    }
 
     yield {"step": "context", "data": {
         "market_title": context.get("market_title", ""),
         "category": category,
         "entities": context.get("entities", []),
+        "phase": "context_ready",
+        "phase_label": "Spike context ready",
+        "message": "Building candidate causal factors",
+        "detail": "Context is ready; starting ontology extraction and evidence search.",
+        "elapsed_seconds": round(time.time() - start_time, 1),
     }}
 
     # Step 2 + 3: Ontology extraction + early evidence gathering IN PARALLEL
@@ -358,7 +425,15 @@ async def attribute_spike_streaming(
     while not ontology_task.done():
         await asyncio.sleep(2)
         if not ontology_task.done():
-            yield {"step": "heartbeat", "data": {"status": "extracting_ontology", "elapsed": round(time.time() - start_time, 1)}}
+            yield {"step": "heartbeat", "data": {
+                "status": "extracting_ontology",
+                "phase": "extracting_ontology",
+                "phase_label": "Building candidate causal factors",
+                "message": "Building candidate causal factors",
+                "detail": "Waiting for ontology extraction to finish.",
+                "waiting_on": "model_response",
+                "elapsed_seconds": round(time.time() - start_time, 1),
+            }}
     ontology = ontology_task.result()
 
     yield {"step": "ontology", "data": {
@@ -375,7 +450,15 @@ async def attribute_spike_streaming(
     while not ev_task.done():
         await asyncio.sleep(2)
         if not ev_task.done():
-            yield {"step": "heartbeat", "data": {"status": "gathering_evidence", "elapsed": round(time.time() - start_time, 1)}}
+            yield {"step": "heartbeat", "data": {
+                "status": "gathering_evidence",
+                "phase": "gathering_evidence",
+                "phase_label": "Comparing supporting vs conflicting evidence",
+                "message": "Comparing supporting vs conflicting evidence",
+                "detail": "Searching for supporting and conflicting reports.",
+                "waiting_on": "evidence_search",
+                "elapsed_seconds": round(time.time() - start_time, 1),
+            }}
     full_evidence = ev_task.result()
 
     # Merge early evidence with full evidence (deduplicate)
@@ -416,7 +499,15 @@ async def attribute_spike_streaming(
     while not prop_task.done():
         await asyncio.sleep(2)
         if not prop_task.done():
-            yield {"step": "heartbeat", "data": {"status": "generating_proposals", "elapsed": round(time.time() - start_time, 1)}}
+            yield {"step": "heartbeat", "data": {
+                "status": "generating_proposals",
+                "phase": "generating_proposals",
+                "phase_label": "Asking agents to challenge the lead narrative",
+                "message": "Asking agents to challenge the lead narrative",
+                "detail": "Waiting for agent proposal responses.",
+                "waiting_on": "model_response",
+                "elapsed_seconds": round(time.time() - start_time, 1),
+            }}
     hypotheses = prop_task.result()
 
     # Yield each agent's proposals

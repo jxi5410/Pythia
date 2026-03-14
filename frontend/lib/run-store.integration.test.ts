@@ -140,3 +140,42 @@ test('store flow: AbortError/navigation does not write an error state', async ()
   assert.equal(state.runErrorSource, null);
   assert.equal(state.runError, null);
 });
+
+test('store flow: heartbeat progress updates remain visible during long stage execution', async () => {
+  const harness = createRunStoreTestHarness({
+    fetchImpl: async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/runs/run-6')) {
+        return jsonResponse({
+          run: { status: 'running', metadata: {} },
+          scenarios: [],
+          actions: [],
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    },
+    connectRunStreamImpl: async (_runId, _lastEventId, callbacks) => {
+      callbacks.onBaceState({
+        step: 0,
+        entities: [],
+        agentsActive: [],
+        debateLog: ['Scanning recent market context', 'Waiting for model response'],
+        counterfactualsTested: 0,
+        currentStageKey: 'building_spike_context',
+        currentStageLabel: 'Building spike context',
+        currentDetail: 'Waiting for the first model response.',
+        waitingOn: 'model_response',
+        elapsedSeconds: 6,
+        lastBackendEventAtMs: Date.now(),
+      });
+    },
+  });
+
+  await harness.initRun('run-6');
+  await flushMicrotasks();
+  const state = harness.getState();
+  assert.equal(state.baceState.currentStageKey, 'building_spike_context');
+  assert.equal(state.baceState.currentStageLabel, 'Building spike context');
+  assert.equal(state.baceState.waitingOn, 'model_response');
+  assert.equal(state.baceState.debateLog.includes('Waiting for model response'), true);
+});

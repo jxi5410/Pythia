@@ -10,6 +10,12 @@ export interface BACEState {
   agentsActive: string[];
   debateLog: string[];
   counterfactualsTested: number;
+  currentStageKey?: string;
+  currentStageLabel?: string;
+  currentDetail?: string;
+  waitingOn?: string | null;
+  elapsedSeconds?: number;
+  lastBackendEventAtMs?: number | null;
 }
 
 /** Enriched state from new SSE events */
