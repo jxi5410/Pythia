@@ -6,12 +6,26 @@ import {
   extractSpikeTimestamp,
   formatSpikeTimestamp,
   normalizeTimestamp,
-} from './run-presentation';
+} from './run-presentation.ts';
 
 test('normalizeTimestamp appends UTC to naive ISO strings for Safari-safe parsing', () => {
   assert.equal(
     normalizeTimestamp('2025-01-15T12:00:00'),
     '2025-01-15T12:00:00Z',
+  );
+});
+
+test('normalizeTimestamp accepts epoch seconds', () => {
+  assert.equal(
+    normalizeTimestamp(1736942400),
+    '2025-01-15T12:00:00.000Z',
+  );
+});
+
+test('normalizeTimestamp accepts epoch milliseconds strings', () => {
+  assert.equal(
+    normalizeTimestamp('1736942400000'),
+    '2025-01-15T12:00:00.000Z',
   );
 });
 
@@ -48,4 +62,8 @@ test('formatSpikeTimestamp returns a stable label for valid timestamps', () => {
 
 test('formatSpikeTimestamp falls back cleanly for invalid timestamps', () => {
   assert.equal(formatSpikeTimestamp('not-a-date'), 'Unknown time');
+});
+
+test('formatSpikeTimestamp falls back cleanly when absent', () => {
+  assert.equal(formatSpikeTimestamp(undefined), 'Unknown time');
 });

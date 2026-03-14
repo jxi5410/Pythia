@@ -30,6 +30,9 @@ export default function RunAttributionPage() {
   const spike = run.selectedSpike;
   const market = run.selectedMarket;
   const showContinue = Boolean(run.attribution && !run.isRunning);
+  const failureMessage = run.runErrorSource === 'backend'
+    ? (run.runError || 'Attribution failed.')
+    : (run.runError || 'Unable to reach the run stream right now.');
 
   return (
     <div style={{ minHeight: 'calc(100vh - 90px)', background: C.bg, fontFamily: serif, color: C.dark }}>
@@ -55,7 +58,7 @@ export default function RunAttributionPage() {
 
         {(run.runStatus === 'error' || run.runStatus === 'failed') && (
           <div style={{ padding: '12px 16px', background: '#fdf0ed', borderRadius: 6, fontFamily: mono, fontSize: 12, color: C.accent, marginBottom: 16 }}>
-            {run.runError || 'Attribution failed. The backend may be unavailable.'}
+            {failureMessage}
           </div>
         )}
 

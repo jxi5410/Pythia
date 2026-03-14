@@ -826,6 +826,19 @@ class RunRepository:
         ).fetchall()
         return [self._row_to_sse_event(r) for r in rows]
 
+    def get_latest_error_event_message(self, run_id: str) -> str | None:
+        row = self._conn.execute(
+            """SELECT payload FROM sse_events
+               WHERE run_id = ? AND event_type = ?
+               ORDER BY sequence DESC LIMIT 1""",
+            (run_id, SSEEventType.ERROR.value),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = _parse_json(row["payload"])
+        error = payload.get("error") if isinstance(payload, dict) else None
+        return error if isinstance(error, str) and error.strip() else None
+
     @staticmethod
     def _row_to_sse_event(row: sqlite3.Row) -> SSEEvent:
         return SSEEvent(

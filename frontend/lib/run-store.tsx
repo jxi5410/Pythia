@@ -9,6 +9,18 @@ import {
 } from './bace-runner';
 import type { BACEGraphState } from '@/components/BACEGraphAnimation';
 import { extractSpikeDirection, extractSpikeTimestamp, type RunMetadataLike } from './run-presentation';
+import {
+  applyBackendHydratedStatus,
+  applyBackendRunFailure,
+  applyClientRunError,
+  isBackendStatusStreamable,
+  isBackendStatusTerminal,
+  isTerminalReplayableStatus,
+  mapBackendStatus,
+  shouldTreatAsIntentionalAbort,
+  type RunErrorSource,
+  type RunStatus,
+} from './run-status';
 
 // ─── Core types ─────────────────────────────────────────────────────
 
@@ -98,95 +110,10 @@ export interface BACEState {
 export type Stage = 'market' | 'attribution' | 'scenarios' | 'interrogation';
 
 // ─── Shared backend → frontend status mapping ───────────────────────
-
-export type RunStatus = 'idle' | 'created' | 'running' | 'completed' | 'failed' | 'error';
-
-/** Map any backend run status string to the frontend RunStatus enum.
- *  Single source of truth — used in initRun hydration, reconnect fallback,
- *  and any status polling. */
-export function mapBackendStatus(backendStatus: string): RunStatus {
-  switch (backendStatus) {
-    // Created / pending
-    case 'created':
-    case 'pending':
-      return 'created';
-
-    // Active / in-progress
-    case 'running':
-    case 'market_snapshot_complete':
-    case 'attribution_started':
-    case 'attribution_streaming':
-    case 'scenario_clustering_complete':
-    case 'graph_persisted':
-      return 'running';
-
-    // Completed variants — all usable states
-    case 'completed':
-    case 'interrogation_ready':
-    case 'partial_complete':
-      return 'completed';
-
-    // Terminal failure variants
-    case 'failed':
-    case 'failed_terminal':
-    case 'failed_retryable':
-    case 'error':
-      return 'failed';
-
-    // Cancelled
-    case 'cancelled':
-      return 'failed';
-
-    default:
-      // Unknown status — treat as running (optimistic) if not clearly terminal
-      return 'running';
-  }
-}
-
-/** Check if a backend status represents a terminal state (no more events expected). */
-export function isBackendStatusTerminal(backendStatus: string): boolean {
-  switch (backendStatus) {
-    case 'completed':
-    case 'interrogation_ready':
-    case 'partial_complete':
-    case 'failed':
-    case 'failed_terminal':
-    case 'failed_retryable':
-    case 'error':
-    case 'cancelled':
-      return true;
-    default:
-      return false;
-  }
-}
-
-/** Check if a backend status represents a completed-ish state (has usable results). */
-function isBackendStatusCompleted(backendStatus: string): boolean {
-  switch (backendStatus) {
-    case 'completed':
-    case 'interrogation_ready':
-    case 'partial_complete':
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isBackendStatusStreamable(backendStatus: string): boolean {
-  switch (backendStatus) {
-    case 'created':
-    case 'pending':
-    case 'running':
-    case 'market_snapshot_complete':
-    case 'attribution_started':
-    case 'attribution_streaming':
-    case 'scenario_clustering_complete':
-    case 'graph_persisted':
-      return true;
-    default:
-      return false;
-  }
-}
+// Invariant:
+// - `runStatus === 'failed'` means a backend terminal run state
+// - `runStatus === 'error'` means a client-only hydration/transport issue
+// - intentional aborts must not write either state
 
 // ─── Run Store ──────────────────────────────────────────────────────
 
@@ -195,6 +122,7 @@ export interface RunState {
   runId: string | null;
   runStatus: RunStatus;
   runError: string | null;
+  runErrorSource: RunErrorSource;
   lastEventSequence: number;
 
   // Stage 1: Market
@@ -238,6 +166,7 @@ const defaultRunState: RunState = {
   runId: null,
   runStatus: 'idle',
   runError: null,
+  runErrorSource: null,
   lastEventSequence: 0,
   searchResults: [],
   selectedMarket: null,
@@ -270,6 +199,329 @@ const RunStoreContext = createContext<RunStoreContextValue | null>(null);
 // Reconnect config
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_ATTEMPTS = 10;
+
+interface RunStoreRuntimeDeps {
+  fetchImpl?: typeof fetch;
+  connectRunStreamImpl?: typeof connectRunStream;
+  sleepImpl?: (ms: number) => Promise<void>;
+  maxReconnectAttempts?: number;
+}
+
+interface RunStoreRuntimeRefs {
+  streamAbortRef: { current: AbortController | null };
+  activeInitRef: { current: string | null };
+  lastSeqRef: { current: number };
+  stateRef: { current: { baceState: BACEState; graphState: BACEGraphState } };
+}
+
+function createRunStoreRuntime(
+  setRunState: React.Dispatch<React.SetStateAction<RunState>>,
+  refs: RunStoreRuntimeRefs,
+  deps: RunStoreRuntimeDeps = {},
+) {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const connectRunStreamImpl = deps.connectRunStreamImpl ?? connectRunStream;
+  const sleepImpl = deps.sleepImpl ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)));
+  const maxReconnectAttempts = deps.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
+
+  const startStreamWithReconnect = (
+    runId: string,
+    callbacks: BACECallbacks,
+  ) => {
+    let attempt = 0;
+
+    const connect = async () => {
+      while (attempt < maxReconnectAttempts) {
+        if (refs.activeInitRef.current !== runId) return;
+
+        const controller = new AbortController();
+        refs.streamAbortRef.current = controller;
+
+        try {
+          const initialAccumulator = attempt > 0
+            ? seedAccumulator(refs.stateRef.current.baceState, refs.stateRef.current.graphState)
+            : undefined;
+
+          await connectRunStreamImpl(runId, refs.lastSeqRef.current, callbacks, {
+            signal: controller.signal,
+            initialAccumulator,
+          });
+          return;
+        } catch (err: unknown) {
+          if (shouldTreatAsIntentionalAbort(err, controller.signal.aborted)) {
+            return;
+          }
+
+          if (err instanceof StreamTerminalError) {
+            console.error('[Pythia] Terminal stream error, not retrying:', err.message);
+            return;
+          }
+
+          if (refs.activeInitRef.current !== runId) return;
+
+          attempt++;
+          console.warn(`[Pythia] Stream disconnected (attempt ${attempt}/${maxReconnectAttempts}), reconnecting in ${RECONNECT_DELAY_MS}ms...`);
+
+          try {
+            const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
+            const statusRes = await fetchImpl(`${backendUrl}/api/runs/${runId}/status`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+
+              if (isBackendStatusTerminal(statusData.status)) {
+                const mappedStatus = mapBackendStatus(statusData.status);
+                setRunState(prev => {
+                  if (prev.runId !== runId) return prev;
+                  return {
+                    ...prev,
+                    ...applyBackendHydratedStatus(
+                      prev,
+                      mappedStatus,
+                      statusData.error_message || prev.runError,
+                    ),
+                  };
+                });
+
+                if (isTerminalReplayableStatus(statusData.status)) {
+                  const replayAcc = seedAccumulator(
+                    refs.stateRef.current.baceState,
+                    refs.stateRef.current.graphState,
+                  );
+                  connectRunStreamImpl(runId, refs.lastSeqRef.current, callbacks, {
+                    replay: true,
+                    initialAccumulator: replayAcc,
+                  }).catch(err => {
+                    if (!(err instanceof StreamTerminalError)) {
+                      console.error('[Pythia] Replay after terminal status failed:', err);
+                    }
+                  });
+                }
+                return;
+              }
+            }
+          } catch {
+            // Status check failed — still try to reconnect the stream
+          }
+
+          await sleepImpl(RECONNECT_DELAY_MS);
+        }
+      }
+
+      if (refs.activeInitRef.current === runId) {
+        console.error('[Pythia] Stream reconnect failed after max attempts');
+        setRunState(prev => {
+          if (prev.runId !== runId) return prev;
+          return { ...prev, ...applyClientRunError(prev, 'Lost connection to the attribution stream.') };
+        });
+      }
+    };
+
+    void connect();
+  };
+
+  const initRun = async (runId: string): Promise<void> => {
+    refs.streamAbortRef.current?.abort();
+    refs.streamAbortRef.current = null;
+
+    refs.activeInitRef.current = runId;
+    refs.lastSeqRef.current = 0;
+    refs.stateRef.current = { baceState: defaultBACEState, graphState: defaultGraphState };
+
+    setRunState(prev => ({
+      ...prev,
+      runId,
+      runStatus: 'running',
+      runError: null,
+      runErrorSource: null,
+      hydrated: false,
+      lastEventSequence: 0,
+      baceState: defaultBACEState,
+      graphState: defaultGraphState,
+      attribution: null,
+      isRunning: false,
+      isLive: false,
+    }));
+
+    const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
+
+    try {
+      const res = await fetchImpl(`${backendUrl}/api/runs/${runId}`);
+      if (!res.ok) throw new Error(`Run not found (${res.status})`);
+
+      if (refs.activeInitRef.current !== runId) return;
+
+      const data = await res.json();
+      const runData = data.run || data;
+      const metadata = (runData.metadata || {}) as RunMetadataLike;
+
+      const spikeEvent = metadata.spike_event;
+      const spikeTimestamp = extractSpikeTimestamp(metadata);
+      const selectedSpike: Spike | null = spikeEvent ? {
+        index: 0,
+        timestamp: spikeTimestamp,
+        magnitude: spikeEvent.magnitude || metadata.magnitude || 0,
+        direction: extractSpikeDirection(metadata),
+        priceBefore: spikeEvent.metadata?.price_before || metadata.price_before || 0,
+        priceAfter: spikeEvent.metadata?.price_after || metadata.price_after || 0,
+      } : (runData.metadata ? {
+        index: 0,
+        timestamp: spikeTimestamp,
+        magnitude: metadata.magnitude || 0,
+        direction: extractSpikeDirection(metadata),
+        priceBefore: metadata.price_before || 0,
+        priceAfter: metadata.price_after || 0,
+      } : null);
+
+      const marketTitle = metadata.market_title || spikeEvent?.metadata?.market_title || '';
+      const selectedMarket: MarketResult | null = marketTitle ? {
+        id: metadata.market_id || runData.market_id || '',
+        question: marketTitle,
+        slug: '', conditionId: '', clobTokenIds: [], outcomes: [], outcomePrices: [],
+        volume24hr: 0, volume: 0, image: '',
+      } : null;
+
+      const mappedStatus = mapBackendStatus(runData.status);
+
+      let attribution: Attribution | null = null;
+      if (data.scenarios?.length || data.actions?.length) {
+        const scenarios: Scenario[] = (data.scenarios || []).map((s: ScenarioPayload) => ({
+          id: s.id || `scenario-${s.mechanism}`, label: s.label || '', mechanism: s.mechanism || 'other',
+          tier: s.tier || 'primary', confidence: s.confidence || 0, lead_agent: s.lead_agent || '',
+          supporting_agents: s.supporting_agents || [], challenging_agents: s.challenging_agents || [],
+          evidence_chain: s.evidence_chain || [], evidence_urls: s.evidence_urls || [],
+          what_breaks_this: s.what_breaks_this || '', causal_chain: s.causal_chain || '',
+          temporal_fit: s.temporal_fit || '', impact_speed: s.impact_speed || '', time_to_peak: s.time_to_peak || '',
+        }));
+        attribution = {
+          depth: runData.metadata?.depth || 2,
+          agentsSpawned: data.actions?.length || 0,
+          hypothesesProposed: scenarios.length,
+          debateRounds: 0,
+          elapsed: runData.metadata?.elapsed_seconds || 0,
+          hypotheses: [],
+          scenarios,
+          rawResult: data,
+        };
+      }
+
+      if (refs.activeInitRef.current !== runId) return;
+
+      const updates: Partial<RunState> = {
+        runId,
+        selectedSpike,
+        selectedMarket,
+        currentStage: mappedStatus === 'completed' ? 'scenarios' : 'attribution',
+        completedStages: new Set(mappedStatus === 'completed' ? ['market', 'attribution'] as Stage[] : ['market'] as Stage[]),
+        isLive: true,
+      };
+      Object.assign(updates, applyBackendHydratedStatus({
+        runStatus: 'idle',
+        runError: null,
+        runErrorSource: null,
+        isRunning: false,
+      }, mappedStatus, runData.error_message || null));
+      if (attribution) {
+        updates.attribution = attribution;
+        updates.completedStages = new Set(['market', 'attribution'] as Stage[]);
+      }
+
+      const streamCallbacks: BACECallbacks = {
+        onBaceState: (state: BACEState) => setRunState(prev => {
+          if (prev.runId !== runId) return prev;
+          refs.stateRef.current = { ...refs.stateRef.current, baceState: state };
+          return { ...prev, baceState: state };
+        }),
+        onGraphState: (state: BACEGraphState) => setRunState(prev => {
+          if (prev.runId !== runId) return prev;
+          refs.stateRef.current = { ...refs.stateRef.current, graphState: state };
+          return { ...prev, graphState: state };
+        }),
+        onComplete: (attr: Attribution) => {
+          setRunState(prev => {
+            if (prev.runId !== runId) return prev;
+            return {
+              ...prev,
+              attribution: attr,
+              isRunning: false,
+              isLive: true,
+              runStatus: 'completed' as RunStatus,
+              runError: null,
+              runErrorSource: null,
+              currentStage: 'scenarios' as Stage,
+              completedStages: new Set(['market', 'attribution'] as Stage[]),
+            };
+          });
+        },
+        onError: (err: string) => {
+          console.error('[Pythia] Stream error:', err);
+          setRunState(prev => {
+            if (prev.runId !== runId) return prev;
+            return { ...prev, ...applyBackendRunFailure(prev, err) };
+          });
+        },
+        onSequence: (seq: number) => {
+          refs.lastSeqRef.current = Math.max(refs.lastSeqRef.current, seq);
+          setRunState(prev => {
+            if (prev.runId !== runId) return prev;
+            return { ...prev, lastEventSequence: Math.max(prev.lastEventSequence, seq) };
+          });
+        },
+      };
+
+      if (isBackendStatusStreamable(runData.status)) {
+        setRunState(prev => ({ ...prev, ...updates, isRunning: true, hydrated: true }));
+        startStreamWithReconnect(runId, streamCallbacks);
+      } else if (isTerminalReplayableStatus(runData.status)) {
+        setRunState(prev => ({ ...prev, ...updates, hydrated: true }));
+        connectRunStreamImpl(runId, 0, streamCallbacks, { replay: true }).catch(err => {
+          if (!(err instanceof StreamTerminalError)) {
+            console.error('[Pythia] Replay error:', err);
+          }
+        });
+      } else {
+        setRunState(prev => ({ ...prev, ...updates, hydrated: true }));
+      }
+    } catch (err: unknown) {
+      if (refs.activeInitRef.current === runId) {
+        console.error('[Pythia] initRun failed:', err);
+        setRunState(prev => ({
+          ...prev,
+          runId,
+          ...applyClientRunError(prev, getErrorMessage(err, 'Failed to load run')),
+          hydrated: true,
+        }));
+      }
+      throw err;
+    }
+  };
+
+  return { initRun };
+}
+
+export function createRunStoreTestHarness(deps: RunStoreRuntimeDeps = {}) {
+  let state: RunState = { ...defaultRunState };
+  const refs: RunStoreRuntimeRefs = {
+    streamAbortRef: { current: null },
+    activeInitRef: { current: null },
+    lastSeqRef: { current: 0 },
+    stateRef: { current: { baceState: defaultBACEState, graphState: defaultGraphState } },
+  };
+
+  const setRunState: React.Dispatch<React.SetStateAction<RunState>> = (updater) => {
+    state = typeof updater === 'function'
+      ? (updater as (prev: RunState) => RunState)(state)
+      : updater;
+  };
+
+  const runtime = createRunStoreRuntime(setRunState, refs, deps);
+  return {
+    getState: () => state,
+    initRun: runtime.initRun,
+    abortActiveRun: () => {
+      refs.streamAbortRef.current?.abort();
+    },
+  };
+}
 
 export function RunStoreProvider({ children }: { children: ReactNode }) {
   const [run, setRunState] = useState<RunState>(defaultRunState);
@@ -309,303 +561,19 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
     baceState: defaultBACEState,
     graphState: defaultGraphState,
   });
-
-  const initRun = useCallback(async (runId: string) => {
-    // Abort any previous stream connection
-    streamAbortRef.current?.abort();
-    streamAbortRef.current = null;
-
-    // Mark this as the active init — any prior in-flight init becomes stale
-    activeInitRef.current = runId;
-    lastSeqRef.current = 0;
-    stateRef.current = { baceState: defaultBACEState, graphState: defaultGraphState };
-
-    // Clear run-specific state before hydrating (prevents stale data flash)
-    setRunState(prev => ({
-      ...prev,
-      runId,
-      runStatus: 'running',
-      runError: null,
-      hydrated: false,
-      lastEventSequence: 0,
-      baceState: defaultBACEState,
-      graphState: defaultGraphState,
-      attribution: null,
-      isRunning: false,
-      isLive: false,
-    }));
-
-    const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
-
-    try {
-      const res = await fetch(`${backendUrl}/api/runs/${runId}`);
-      if (!res.ok) throw new Error(`Run not found (${res.status})`);
-
-      // Check if we're still the active init (user may have navigated to another run)
-      if (activeInitRef.current !== runId) return;
-
-      const data = await res.json();
-      const runData = data.run || data;
-      const metadata = (runData.metadata || {}) as RunMetadataLike;
-
-      // Map spike event from metadata
-      const spikeEvent = metadata.spike_event;
-      const spikeTimestamp = extractSpikeTimestamp(metadata);
-      const selectedSpike: Spike | null = spikeEvent ? {
-        index: 0,
-        timestamp: spikeTimestamp,
-        magnitude: spikeEvent.magnitude || metadata.magnitude || 0,
-        direction: extractSpikeDirection(metadata),
-        priceBefore: spikeEvent.metadata?.price_before || metadata.price_before || 0,
-        priceAfter: spikeEvent.metadata?.price_after || metadata.price_after || 0,
-      } : (runData.metadata ? {
-        index: 0,
-        timestamp: spikeTimestamp,
-        magnitude: metadata.magnitude || 0,
-        direction: extractSpikeDirection(metadata),
-        priceBefore: metadata.price_before || 0,
-        priceAfter: metadata.price_after || 0,
-      } : null);
-
-      const marketTitle = metadata.market_title || spikeEvent?.metadata?.market_title || '';
-      const selectedMarket: MarketResult | null = marketTitle ? {
-        id: metadata.market_id || runData.market_id || '',
-        question: marketTitle,
-        slug: '', conditionId: '', clobTokenIds: [], outcomes: [], outcomePrices: [],
-        volume24hr: 0, volume: 0, image: '',
-      } : null;
-
-      const mappedStatus = mapBackendStatus(runData.status);
-
-      // Build attribution from scenarios/evidence if completed
-      let attribution: Attribution | null = null;
-      if (data.scenarios?.length || data.actions?.length) {
-        const scenarios: Scenario[] = (data.scenarios || []).map((s: ScenarioPayload) => ({
-          id: s.id || `scenario-${s.mechanism}`, label: s.label || '', mechanism: s.mechanism || 'other',
-          tier: s.tier || 'primary', confidence: s.confidence || 0, lead_agent: s.lead_agent || '',
-          supporting_agents: s.supporting_agents || [], challenging_agents: s.challenging_agents || [],
-          evidence_chain: s.evidence_chain || [], evidence_urls: s.evidence_urls || [],
-          what_breaks_this: s.what_breaks_this || '', causal_chain: s.causal_chain || '',
-          temporal_fit: s.temporal_fit || '', impact_speed: s.impact_speed || '', time_to_peak: s.time_to_peak || '',
-        }));
-        attribution = {
-          depth: runData.metadata?.depth || 2,
-          agentsSpawned: data.actions?.length || 0,
-          hypothesesProposed: scenarios.length,
-          debateRounds: 0,
-          elapsed: runData.metadata?.elapsed_seconds || 0,
-          hypotheses: [],
-          scenarios,
-          rawResult: data,
-        };
-      }
-
-      // Check staleness again before applying
-      if (activeInitRef.current !== runId) return;
-
-      const updates: Partial<RunState> = {
-        runId,
-        runStatus: mappedStatus,
-        runError: runData.error_message || null,
-        selectedSpike,
-        selectedMarket,
-        currentStage: mappedStatus === 'completed' ? 'scenarios' : 'attribution',
-        completedStages: new Set(mappedStatus === 'completed' ? ['market', 'attribution'] as Stage[] : ['market'] as Stage[]),
-        isLive: true,
-      };
-      if (attribution) {
-        updates.attribution = attribution;
-        updates.completedStages = new Set(['market', 'attribution'] as Stage[]);
-      }
-
-      // Create stream callbacks (shared between initial connect and reconnect).
-      // These callbacks guard against stale runId and update the stateRef so
-      // the reconnect loop can seed accumulators from current store state.
-      const streamCallbacks: BACECallbacks = {
-        onBaceState: (state: BACEState) => setRunState(prev => {
-          if (prev.runId !== runId) return prev;
-          stateRef.current = { ...stateRef.current, baceState: state };
-          return { ...prev, baceState: state };
-        }),
-        onGraphState: (state: BACEGraphState) => setRunState(prev => {
-          if (prev.runId !== runId) return prev;
-          stateRef.current = { ...stateRef.current, graphState: state };
-          return { ...prev, graphState: state };
-        }),
-        onComplete: (attr: Attribution) => {
-          setRunState(prev => {
-            if (prev.runId !== runId) return prev;
-            return {
-              ...prev,
-              attribution: attr,
-              isRunning: false,
-              isLive: true,
-              runStatus: 'completed' as RunStatus,
-              runError: null,
-              currentStage: 'scenarios' as Stage,
-              completedStages: new Set(['market', 'attribution'] as Stage[]),
-            };
-          });
-        },
-        onError: (err: string) => {
-          console.error('[Pythia] Stream error:', err);
-          // Terminal SSE errors set the store to failed.
-          // The StreamTerminalError throw in connectRunStream ensures
-          // the reconnect loop also stops.
-          setRunState(prev => {
-            if (prev.runId !== runId) return prev;
-            return { ...prev, runStatus: 'failed', runError: err, isRunning: false };
-          });
-        },
-        onSequence: (seq: number) => {
-          lastSeqRef.current = Math.max(lastSeqRef.current, seq);
-          setRunState(prev => {
-            if (prev.runId !== runId) return prev;
-            return { ...prev, lastEventSequence: Math.max(prev.lastEventSequence, seq) };
-          });
-        },
-      };
-
-      if (isBackendStatusStreamable(runData.status)) {
-        setRunState(prev => ({ ...prev, ...updates, isRunning: true, hydrated: true }));
-
-        // Start stream with reconnect loop
-        startStreamWithReconnect(runId, streamCallbacks);
-      } else if (mappedStatus === 'completed') {
-        // Replay is a one-shot JSON fetch — no reconnect needed
-        setRunState(prev => ({ ...prev, ...updates, hydrated: true }));
-        connectRunStream(runId, 0, streamCallbacks, { replay: true }).catch(err => {
-          console.error('[Pythia] Replay error:', err);
-        });
-      } else {
-        // failed/error/created — just set the state
-        setRunState(prev => ({ ...prev, ...updates, hydrated: true }));
-      }
-    } catch (err: unknown) {
-      // Only set error if this init is still active
-      if (activeInitRef.current === runId) {
-        console.error('[Pythia] initRun failed:', err);
-        setRunState(prev => ({
-          ...prev,
-          runId,
-          runStatus: 'error',
-          runError: getErrorMessage(err, 'Failed to load run'),
-          hydrated: true,
-        }));
-      }
-      throw err;
+  const runtimeRef = useRef<ReturnType<typeof createRunStoreRuntime> | null>(null);
+  const getRuntime = useCallback(() => {
+    if (runtimeRef.current == null) {
+      runtimeRef.current = createRunStoreRuntime(setRunState, {
+        streamAbortRef,
+        activeInitRef,
+        lastSeqRef,
+        stateRef,
+      });
     }
+    return runtimeRef.current;
   }, []);
-
-  /** Connect to live SSE with automatic reconnect on failure.
-   *  Distinguishes:
-   *  - StreamTerminalError → backend error event, stop immediately
-   *  - AbortError → intentional navigation/reset, stop silently
-   *  - Other errors → network failure, retry with status check */
-  function startStreamWithReconnect(
-    runId: string,
-    callbacks: BACECallbacks,
-  ) {
-    let attempt = 0;
-
-    const connect = async () => {
-      while (attempt < MAX_RECONNECT_ATTEMPTS) {
-        // Bail if this run is no longer active
-        if (activeInitRef.current !== runId) return;
-
-        // Create a fresh AbortController for this connection attempt
-        const controller = new AbortController();
-        streamAbortRef.current = controller;
-
-        try {
-          // Seed accumulator from current store state so reconnect
-          // applies unseen-tail events on top of existing data
-          const initialAccumulator = attempt > 0
-            ? seedAccumulator(stateRef.current.baceState, stateRef.current.graphState)
-            : undefined;
-
-          await connectRunStream(runId, lastSeqRef.current, callbacks, {
-            signal: controller.signal,
-            initialAccumulator,
-          });
-          // Stream ended normally (done/run_completed) — no reconnect needed
-          return;
-        } catch (err: unknown) {
-          // Intentional abort (navigation/reset) — stop silently
-          if ((err instanceof Error && err.name === 'AbortError') || controller.signal.aborted) {
-            return;
-          }
-
-          // Terminal SSE error from backend — store already updated by onError
-          if (err instanceof StreamTerminalError) {
-            console.error('[Pythia] Terminal stream error, not retrying:', err.message);
-            return;
-          }
-
-          // Bail if run is no longer active (checked after await)
-          if (activeInitRef.current !== runId) return;
-
-          attempt++;
-          console.warn(`[Pythia] Stream disconnected (attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS}), reconnecting in ${RECONNECT_DELAY_MS}ms...`);
-
-          // Check if run reached a terminal state while we were disconnected
-          try {
-            const backendUrl = process.env.NEXT_PUBLIC_PYTHIA_API_URL || 'http://localhost:8000';
-            const statusRes = await fetch(`${backendUrl}/api/runs/${runId}/status`);
-            if (statusRes.ok) {
-              const statusData = await statusRes.json();
-
-              if (isBackendStatusTerminal(statusData.status)) {
-                const mappedStatus = mapBackendStatus(statusData.status);
-                setRunState(prev => {
-                  if (prev.runId !== runId) return prev;
-                  return {
-                    ...prev,
-                    runStatus: mappedStatus,
-                    runError: statusData.error_message || prev.runError,
-                    isRunning: false,
-                  };
-                });
-
-                // If it completed, replay to fill in any missing state
-                if (isBackendStatusCompleted(statusData.status)) {
-                  const replayAcc = seedAccumulator(
-                    stateRef.current.baceState,
-                    stateRef.current.graphState,
-                  );
-                  connectRunStream(runId, lastSeqRef.current, callbacks, {
-                    replay: true,
-                    initialAccumulator: replayAcc,
-                  }).catch(() => {});
-                }
-                return;
-              }
-            }
-          } catch {
-            // Status check failed — still try to reconnect the stream
-          }
-
-          await new Promise(resolve => setTimeout(resolve, RECONNECT_DELAY_MS));
-        }
-      }
-
-      // Exhausted retries
-      if (activeInitRef.current === runId) {
-        console.error('[Pythia] Stream reconnect failed after max attempts');
-        setRunState(prev => {
-          if (prev.runId !== runId) return prev;
-          return {
-            ...prev,
-            runStatus: 'error',
-            runError: 'Lost connection to the attribution stream.',
-            isRunning: false,
-          };
-        });
-      }
-    };
-
-    connect();
-  }
+  const initRun = useCallback((runId: string) => getRuntime().initRun(runId), [getRuntime]);
 
   return (
     <RunStoreContext.Provider value={{ run, setRun, resetRun, canNavigateTo, initRun }}>

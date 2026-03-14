@@ -468,6 +468,187 @@ class TestRunEndpoints:
 
         updated = self.repo.get_run(str(run.id))
         assert updated.status == RunStatus.CANCELLED
+        assert updated.error_message == "Run cancelled by user."
+
+    def test_stream_persists_orchestrator_failure_message(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.CREATED,
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+
+        class FailingOrchestrator:
+            async def execute_run(self, **kwargs):
+                raise RuntimeError("upstream evidence fetch failed")
+
+        with patch("src.api.server._get_repo", return_value=self.repo), \
+             patch("src.api.server._get_orchestrator", return_value=FailingOrchestrator()):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+            status_resp = client.get(f"/api/runs/{run.id}/status")
+            run_resp = client.get(f"/api/runs/{run.id}")
+
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames
+        assert error_frames[0]["data"]["payload"]["error"] == "RuntimeError: upstream evidence fetch failed"
+        assert error_frames[0]["data"]["payload"]["status"] == "failed_terminal"
+
+        updated = self.repo.get_run(str(run.id))
+        assert updated is not None
+        assert updated.status == RunStatus.FAILED_TERMINAL
+        assert updated.error_message == "RuntimeError: upstream evidence fetch failed"
+        assert status_resp.json()["error_message"] == "RuntimeError: upstream evidence fetch failed"
+        assert run_resp.json()["run"]["error_message"] == "RuntimeError: upstream evidence fetch failed"
+
+    def test_stream_classifies_retryable_wrapper_failure(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.CREATED,
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+
+        class FailingOrchestrator:
+            async def execute_run(self, **kwargs):
+                raise TimeoutError("upstream timed out")
+
+        with patch("src.api.server._get_repo", return_value=self.repo), \
+             patch("src.api.server._get_orchestrator", return_value=FailingOrchestrator()):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+        updated = self.repo.get_run(str(run.id))
+        assert updated is not None
+        assert updated.status == RunStatus.FAILED_RETRYABLE
+        assert updated.error_message == "TimeoutError: upstream timed out"
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames[0]["data"]["payload"]["status"] == "failed_retryable"
+
+    def test_stream_classifies_terminal_wrapper_failure(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.CREATED,
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+
+        class FailingOrchestrator:
+            async def execute_run(self, **kwargs):
+                raise ValueError("bad payload")
+
+        with patch("src.api.server._get_repo", return_value=self.repo), \
+             patch("src.api.server._get_orchestrator", return_value=FailingOrchestrator()):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+        updated = self.repo.get_run(str(run.id))
+        assert updated is not None
+        assert updated.status == RunStatus.FAILED_TERMINAL
+        assert updated.error_message == "ValueError: bad payload"
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames[0]["data"]["payload"]["status"] == "failed_terminal"
+
+    def test_terminal_failed_run_stream_replays_persisted_error_message(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.FAILED_RETRYABLE,
+            error_message="TimeoutError: upstream timed out",
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+
+        with patch("src.api.server._get_repo", return_value=self.repo):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames
+        payload = error_frames[0]["data"]["payload"]
+        assert payload["status"] == "failed_retryable"
+        assert payload["error"] == "TimeoutError: upstream timed out"
+
+    def test_terminal_run_recovers_historical_null_error_from_sse_events(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.FAILED_TERMINAL,
+            error_message=None,
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+        self.repo.save_sse_event(SSEEvent(
+            run_id=run.id,
+            stage="error",
+            event_type=SSEEventType.ERROR,
+            sequence=0,
+            payload={"run_id": str(run.id), "status": "failed_terminal", "error": "RuntimeError: recovered from event log"},
+        ))
+
+        with patch("src.api.server._get_repo", return_value=self.repo):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+        updated = self.repo.get_run(str(run.id))
+        assert updated is not None
+        assert updated.error_message == "RuntimeError: recovered from event log"
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames[0]["data"]["payload"]["error"] == "RuntimeError: recovered from event log"
+
+    def test_terminal_run_without_error_detail_uses_explicit_fallback(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        run = AttributionRun(
+            spike_event_id=uuid4(),
+            market_id=uuid4(),
+            status=RunStatus.FAILED_TERMINAL,
+            error_message=None,
+            metadata={"market_title": "Test Market"},
+        )
+        self.repo.create_run(run)
+
+        with patch("src.api.server._get_repo", return_value=self.repo):
+            client = TestClient(app)
+            with client.stream("GET", f"/api/runs/{run.id}/stream") as resp:
+                raw = resp.read().decode()
+
+        updated = self.repo.get_run(str(run.id))
+        assert updated is not None
+        assert updated.error_message is None
+        frames = _parse_sse_frames(raw)
+        error_frames = [f for f in frames if f.get("event") == "error"]
+        assert error_frames[0]["data"]["payload"]["error"] == "Run failed."
 
     def test_cancel_completed_run_is_noop(self):
         from fastapi.testclient import TestClient

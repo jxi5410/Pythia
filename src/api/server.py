@@ -243,6 +243,51 @@ def _parse_spike_timestamp(ts_raw: str) -> datetime:
         raise HTTPException(status_code=422, detail=f"Invalid timestamp: {ts_raw}") from exc
 
 
+def _format_error_message(exc: BaseException) -> str:
+    raw = str(exc).strip()
+    return f"{type(exc).__name__}: {raw}" if raw else type(exc).__name__
+
+
+def _terminal_error_message(status: RunStatus, error_message: str | None = None) -> str:
+    if error_message:
+        return error_message
+    if status == RunStatus.CANCELLED:
+        return "Run cancelled by user."
+    if status == RunStatus.PARTIAL_COMPLETE:
+        return "Run ended partially and requires review."
+    if status == RunStatus.FAILED_RETRYABLE:
+        return "Run failed with a retryable error."
+    return "Run failed."
+
+
+def _classify_failure_status(exc: BaseException) -> RunStatus:
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return RunStatus.FAILED_RETRYABLE
+    msg = str(exc).lower()
+    if any(tok in msg for tok in ("timeout", "rate_limit", "429", "503", "retry")):
+        return RunStatus.FAILED_RETRYABLE
+    return RunStatus.FAILED_TERMINAL
+
+
+def _recover_terminal_error_message(repo, run) -> str:
+    """Recover durable error detail for terminal runs with NULL error_message.
+
+    Order of preference:
+    1. persisted run.error_message
+    2. latest persisted terminal SSE error payload
+    3. explicit synthetic fallback by terminal status
+    """
+    if run.error_message:
+        return run.error_message
+
+    recovered = repo.get_latest_error_event_message(str(run.id))
+    if recovered:
+        repo.update_run_status(str(run.id), run.status, error_message=recovered)
+        return recovered
+
+    return _terminal_error_message(run.status, None)
+
+
 # ─── LLM ──────────────────────────────────────────────────────────────
 _llm_fast = None
 _llm_strong = None
@@ -610,18 +655,35 @@ async def stream_run(run_id: str, request: Request):
             fresh_run = repo.get_run(run_id)
             if fresh_run and fresh_run.status in (
                 RunStatus.COMPLETED, RunStatus.FAILED_TERMINAL,
-                RunStatus.CANCELLED, RunStatus.PARTIAL_COMPLETE,
+                RunStatus.FAILED_RETRYABLE, RunStatus.CANCELLED,
+                RunStatus.PARTIAL_COMPLETE,
             ):
+                recovered_error = None
+                if fresh_run.status != RunStatus.COMPLETED:
+                    recovered_error = _recover_terminal_error_message(repo, fresh_run)
                 # Only emit terminal event if we haven't replayed one
                 terminal_types = {SSEEventType.RUN_COMPLETED, SSEEventType.ERROR}
                 if not any(e.event_type in terminal_types for e in stored_events):
-                    evt = _make_sse_event(
-                        run_uuid, fresh_run.status.value,
-                        SSEEventType.RUN_COMPLETED if fresh_run.status == RunStatus.COMPLETED
-                        else SSEEventType.ERROR,
-                        seq.next(),
-                        {"run_id": run_id, "status": fresh_run.status.value},
-                    )
+                    if fresh_run.status == RunStatus.COMPLETED:
+                        evt = _make_sse_event(
+                            run_uuid, fresh_run.status.value,
+                            SSEEventType.RUN_COMPLETED,
+                            seq.next(),
+                            {"run_id": run_id, "status": fresh_run.status.value},
+                        )
+                    else:
+                        recovered_error = _recover_terminal_error_message(repo, fresh_run)
+                        evt = _make_sse_event(
+                            run_uuid, fresh_run.status.value,
+                            SSEEventType.ERROR,
+                            seq.next(),
+                            {
+                                "run_id": run_id,
+                                "status": fresh_run.status.value,
+                                "error": recovered_error,
+                            },
+                        )
+                    repo.save_sse_event(evt)
                     yield format_sse_frame(evt)
                 return
 
@@ -654,11 +716,23 @@ async def stream_run(run_id: str, request: Request):
                         on_event=on_event,
                     )
                 except Exception as exc:
-                    logger.error("Orchestrator failed for %s: %s", run_id, exc)
+                    error_msg = _format_error_message(exc)
+                    failure_status = _classify_failure_status(exc)
+                    logger.error("Orchestrator failed for %s: %s", run_id, error_msg)
+                    repo.update_run_status(
+                        run_id,
+                        failure_status,
+                        error_message=error_msg,
+                    )
                     err_evt = _make_sse_event(
                         run_uuid, "error", SSEEventType.ERROR, seq.next(),
-                        {"error": str(exc), "run_id": run_id},
+                        {
+                            "error": error_msg,
+                            "run_id": run_id,
+                            "status": failure_status.value,
+                        },
                     )
+                    repo.save_sse_event(err_evt)
                     await event_queue.put(err_evt)
                 finally:
                     await event_queue.put(None)  # sentinel
@@ -669,10 +743,21 @@ async def stream_run(run_id: str, request: Request):
             while True:
                 if cancel_event.is_set():
                     orch_task.cancel()
+                    cancel_message = _terminal_error_message(RunStatus.CANCELLED)
+                    repo.update_run_status(
+                        run_id,
+                        RunStatus.CANCELLED,
+                        error_message=cancel_message,
+                    )
                     evt = _make_sse_event(
                         run_uuid, "cancelled", SSEEventType.ERROR, seq.next(),
-                        {"run_id": run_id, "status": "cancelled"},
+                        {
+                            "run_id": run_id,
+                            "status": RunStatus.CANCELLED.value,
+                            "error": cancel_message,
+                        },
                     )
+                    repo.save_sse_event(evt)
                     yield format_sse_frame(evt)
                     return
 
@@ -840,7 +925,11 @@ async def cancel_run(run_id: str):
     if cancel_event:
         cancel_event.set()
 
-    repo.update_run_status(run_id, RunStatus.CANCELLED)
+    repo.update_run_status(
+        run_id,
+        RunStatus.CANCELLED,
+        error_message=_terminal_error_message(RunStatus.CANCELLED),
+    )
     return {"run_id": run_id, "status": "cancelled"}
 
 
