@@ -356,7 +356,7 @@ async def attribute_spike_streaming(
 
     # Wait for ontology with keepalive heartbeats (prevents SSE timeout)
     while not ontology_task.done():
-        await asyncio.sleep(8)
+        await asyncio.sleep(2)
         if not ontology_task.done():
             yield {"step": "heartbeat", "data": {"status": "extracting_ontology", "elapsed": round(time.time() - start_time, 1)}}
     ontology = ontology_task.result()
@@ -366,12 +366,14 @@ async def attribute_spike_streaming(
         "relationship_count": len(ontology.relationships),
         "search_queries": len(ontology.search_queries),
         "entities": [e.name for e in ontology.entities[:10]],
+        "full_entities": [asdict(e) for e in ontology.entities],
+        "full_relationships": [asdict(r) for r in ontology.relationships],
     }}
 
     # Now do the full evidence search with ontology terms
     ev_task = asyncio.ensure_future(gather_evidence_parallel(ontology, context))
     while not ev_task.done():
-        await asyncio.sleep(8)
+        await asyncio.sleep(2)
         if not ev_task.done():
             yield {"step": "heartbeat", "data": {"status": "gathering_evidence", "elapsed": round(time.time() - start_time, 1)}}
     full_evidence = ev_task.result()
@@ -412,7 +414,7 @@ async def attribute_spike_streaming(
     # Step 5: Proposals (PARALLEL)
     prop_task = asyncio.ensure_future(run_proposals_parallel(agents, context, ontology, evidence, llm_fast, agent_evidence))
     while not prop_task.done():
-        await asyncio.sleep(8)
+        await asyncio.sleep(2)
         if not prop_task.done():
             yield {"step": "heartbeat", "data": {"status": "generating_proposals", "elapsed": round(time.time() - start_time, 1)}}
     hypotheses = prop_task.result()

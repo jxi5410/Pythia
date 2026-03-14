@@ -485,9 +485,8 @@ function createRunStoreRuntime(
       if (refs.activeInitRef.current === runId) {
         console.error('[Pythia] initRun failed:', err);
         setRunState(prev => ({
-          ...prev,
-          runId,
           ...applyClientRunError(prev, getErrorMessage(err, 'Failed to load run')),
+          runId,
           hydrated: true,
         }));
       }

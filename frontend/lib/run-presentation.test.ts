@@ -6,7 +6,7 @@ import {
   extractSpikeTimestamp,
   formatSpikeTimestamp,
   normalizeTimestamp,
-} from './run-presentation.ts';
+} from './run-presentation';
 
 test('normalizeTimestamp appends UTC to naive ISO strings for Safari-safe parsing', () => {
   assert.equal(

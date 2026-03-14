@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { StreamTerminalError } from './bace-runner.ts';
-import { createRunStoreTestHarness } from './run-store.tsx';
+import { StreamTerminalError } from './bace-runner';
+import { createRunStoreTestHarness } from './run-store';
 
 function jsonResponse(body: unknown, ok = true, status = 200) {
   return {

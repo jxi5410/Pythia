@@ -7,7 +7,7 @@ import {
   applyClientRunError,
   shouldTreatAsIntentionalAbort,
   type RunErrorState,
-} from './run-status.ts';
+} from './run-status';
 
 function baseState(): RunErrorState {
   return {

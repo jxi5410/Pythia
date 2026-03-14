@@ -568,6 +568,95 @@ class TestRunEndpoints:
         error_frames = [f for f in frames if f.get("event") == "error"]
         assert error_frames[0]["data"]["payload"]["status"] == "failed_terminal"
 
+    def test_stream_invalid_ontology_payload_persists_useful_error(self):
+        from src.core.run_orchestrator import RunOrchestrator
+
+        async def malformed_stream(*args, **kwargs):
+            yield {"step": "context", "data": {"market_title": "Test Market", "category": "crypto", "entities": []}}
+            yield {"step": "ontology", "data": {
+                "entity_count": 1,
+                "relationship_count": 0,
+                "search_queries": 1,
+                "entities": ["BTC"],
+            }}
+
+        spike_event = SpikeEvent(
+            market_id=uuid4(),
+            spike_type=SpikeType.UP,
+            magnitude=0.25,
+            threshold_used=0.1,
+            metadata={"market_title": "Test Market", "timestamp": "2025-01-15T12:00:00Z"},
+        )
+        captured: list[SSEEvent] = []
+        orch = RunOrchestrator(self.repo)
+
+        async def on_event(evt: SSEEvent) -> None:
+            captured.append(evt)
+
+        with patch("src.core.bace_parallel.attribute_spike_streaming", malformed_stream):
+            result = asyncio.run(orch.execute_run(str(uuid4()), spike_event, on_event))
+
+        updated = self.repo.get_run(str(result.id))
+        assert updated is not None
+        assert updated.status == RunStatus.FAILED_TERMINAL
+        assert updated.error_message == "ValueError: Invalid ontology payload: entities[0] expected object, got str"
+        assert captured[-1].event_type == SSEEventType.ERROR
+        assert captured[-1].payload["error"] == updated.error_message
+
+    def test_stream_uses_full_ontology_payload_for_graph_persistence(self):
+        from src.core.run_orchestrator import RunOrchestrator
+
+        async def valid_stream(*args, **kwargs):
+            yield {"step": "context", "data": {"market_title": "Test Market", "category": "crypto", "entities": []}}
+            yield {"step": "ontology", "data": {
+                "entity_count": 1,
+                "relationship_count": 0,
+                "search_queries": 1,
+                "entities": ["BTC"],
+                "full_entities": [
+                    {
+                        "id": "btc",
+                        "name": "BTC",
+                        "entity_type": "Market",
+                        "description": "Bitcoin",
+                        "search_terms": ["BTC"],
+                        "relevance_score": 0.9,
+                    },
+                ],
+                "full_relationships": [],
+            }}
+            yield {"step": "result", "data": {
+                "agent_hypotheses": [],
+                "attribution": {"most_likely_cause": "No cause survived"},
+                "elapsed_seconds": 0.1,
+                "bace_metadata": {},
+            }}
+
+        spike_event = SpikeEvent(
+            market_id=uuid4(),
+            spike_type=SpikeType.UP,
+            magnitude=0.25,
+            threshold_used=0.1,
+            metadata={"market_title": "Test Market", "timestamp": "2025-01-15T12:00:00Z"},
+        )
+        captured: list[SSEEvent] = []
+        orch = RunOrchestrator(self.repo)
+
+        async def on_event(evt: SSEEvent) -> None:
+            captured.append(evt)
+
+        with patch("src.core.bace_parallel.attribute_spike_streaming", valid_stream):
+            result = asyncio.run(orch.execute_run(str(uuid4()), spike_event, on_event))
+
+        updated = self.repo.get_run(str(result.id))
+        assert updated is not None
+        assert updated.status == RunStatus.COMPLETED
+        assert updated.error_message is None
+        assert any(evt.event_type == SSEEventType.RUN_COMPLETED for evt in captured)
+        graph = self.repo.get_graph_nodes(str(result.id))
+        assert len(graph) == 1
+        assert graph[0].label == "BTC"
+
     def test_terminal_failed_run_stream_replays_persisted_error_message(self):
         from fastapi.testclient import TestClient
         from src.api.server import app

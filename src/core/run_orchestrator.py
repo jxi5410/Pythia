@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 import traceback
+from collections.abc import Mapping
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -93,6 +94,56 @@ def _is_retryable(exc: BaseException) -> bool:
         return True
     msg = str(exc).lower()
     return any(tok in msg for tok in ("timeout", "rate_limit", "429", "503", "retry"))
+
+
+def _validate_mapping_list(
+    payload: Mapping[str, Any],
+    primary_key: str,
+    fallback_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return a list of mapping items from a pipeline payload or raise a typed error."""
+    raw_items = payload.get(primary_key)
+    source_key = primary_key
+    if raw_items is None and fallback_key is not None:
+        raw_items = payload.get(fallback_key)
+        source_key = fallback_key
+
+    if raw_items is None:
+        return []
+    if not isinstance(raw_items, list):
+        raise ValueError(
+            f"Invalid ontology payload: {source_key} must be a list, got {type(raw_items).__name__}",
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                f"Invalid ontology payload: {source_key}[{idx}] expected object, got {type(item).__name__}",
+            )
+        normalized.append(dict(item))
+    return normalized
+
+
+def _normalize_ontology_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize ontology event payloads into graph-manager-ready objects."""
+    entities = _validate_mapping_list(payload, "full_entities", "entities")
+    relationships = _validate_mapping_list(payload, "full_relationships", "relationships")
+    search_queries = payload.get("search_queries", 0)
+    if isinstance(search_queries, list):
+        search_query_count = len(search_queries)
+    elif isinstance(search_queries, int):
+        search_query_count = search_queries
+    else:
+        raise ValueError(
+            "Invalid ontology payload: search_queries must be a list or count",
+        )
+
+    return {
+        "entities": entities,
+        "relationships": relationships,
+        "search_queries": search_query_count,
+    }
 
 
 # ── Adapters: legacy dataclasses → Pydantic models ──────────────────
@@ -439,10 +490,11 @@ class RunOrchestrator:
                     )
 
                 elif step == "ontology":
+                    ontology_payload = _normalize_ontology_payload(data)
                     # Persist graph nodes/edges/deltas via GraphManager
                     nodes, edges, deltas = (
                         self._graph_manager.record_ontology(
-                            run_id, data, graph_delta_seq,
+                            run_id, ontology_payload, graph_delta_seq,
                         )
                     )
                     graph_delta_seq += len(deltas)
@@ -450,7 +502,11 @@ class RunOrchestrator:
                     await self._emit(
                         on_event, run_id, "attribution_started",
                         SSEEventType.GRAPH_DELTA, seq,
-                        {"nodes": len(nodes), "edges": len(edges)},
+                        {
+                            "nodes": len(nodes),
+                            "edges": len(edges),
+                            "search_queries": ontology_payload["search_queries"],
+                        },
                     )
 
                 elif step == "evidence":
