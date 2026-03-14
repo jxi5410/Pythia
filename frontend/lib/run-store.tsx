@@ -7,7 +7,7 @@ import {
   seedAccumulator,
   type BACECallbacks,
 } from './bace-runner';
-import type { BACEGraphState, OntologyEntity, OntologyRelationship, AgentInfo, ProposalHypothesis, DivergencePair } from '@/components/BACEGraphAnimation';
+import type { BACEGraphState } from '@/components/BACEGraphAnimation';
 import { extractSpikeDirection, extractSpikeTimestamp, type RunMetadataLike } from './run-presentation';
 
 // ─── Core types ─────────────────────────────────────────────────────
@@ -60,7 +60,30 @@ export interface Attribution {
   hypotheses: Hypothesis[];
   scenarios: Scenario[];
   governance?: { decision: string; reason: string; run_id?: string };
-  rawResult?: any;
+  rawResult?: unknown;
+}
+
+interface ScenarioPayload {
+  id?: string;
+  label?: string;
+  mechanism?: string;
+  tier?: Scenario['tier'];
+  confidence?: number;
+  lead_agent?: string;
+  supporting_agents?: string[];
+  challenging_agents?: string[];
+  evidence_chain?: string[];
+  evidence_urls?: string[];
+  what_breaks_this?: string;
+  causal_chain?: string;
+  temporal_fit?: string;
+  impact_speed?: string;
+  time_to_peak?: string;
+}
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 export interface BACEState {
@@ -357,7 +380,7 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
       // Build attribution from scenarios/evidence if completed
       let attribution: Attribution | null = null;
       if (data.scenarios?.length || data.actions?.length) {
-        const scenarios: Scenario[] = (data.scenarios || []).map((s: any) => ({
+        const scenarios: Scenario[] = (data.scenarios || []).map((s: ScenarioPayload) => ({
           id: s.id || `scenario-${s.mechanism}`, label: s.label || '', mechanism: s.mechanism || 'other',
           tier: s.tier || 'primary', confidence: s.confidence || 0, lead_agent: s.lead_agent || '',
           supporting_agents: s.supporting_agents || [], challenging_agents: s.challenging_agents || [],
@@ -458,7 +481,7 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
         // failed/error/created — just set the state
         setRunState(prev => ({ ...prev, ...updates, hydrated: true }));
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Only set error if this init is still active
       if (activeInitRef.current === runId) {
         console.error('[Pythia] initRun failed:', err);
@@ -466,7 +489,7 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
           ...prev,
           runId,
           runStatus: 'error',
-          runError: err?.message || 'Failed to load run',
+          runError: getErrorMessage(err, 'Failed to load run'),
           hydrated: true,
         }));
       }
@@ -507,9 +530,9 @@ export function RunStoreProvider({ children }: { children: ReactNode }) {
           });
           // Stream ended normally (done/run_completed) — no reconnect needed
           return;
-        } catch (err: any) {
+        } catch (err: unknown) {
           // Intentional abort (navigation/reset) — stop silently
-          if (err.name === 'AbortError' || controller.signal.aborted) {
+          if ((err instanceof Error && err.name === 'AbortError') || controller.signal.aborted) {
             return;
           }
 

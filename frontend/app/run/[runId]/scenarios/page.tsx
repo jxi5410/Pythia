@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useRunStore, C, mono, serif } from '@/lib/run-store';
+import { useRunStore, C, mono, serif, type Attribution, type Hypothesis } from '@/lib/run-store';
 import ScenarioPanel from '@/components/ScenarioPanel';
 import { formatSpikeTimestamp } from '@/lib/run-presentation';
 
@@ -87,7 +87,7 @@ export default function RunScenariosPage() {
 }
 
 // Legacy flat hypothesis list (fallback)
-function LegacyHypotheses({ attr, isLive }: { attr: any; isLive: boolean }) {
+function LegacyHypotheses({ attr, isLive }: { attr: Attribution; isLive: boolean }) {
   return (
     <div style={{ padding: '24px 0' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' as const }}>
@@ -98,7 +98,7 @@ function LegacyHypotheses({ attr, isLive }: { attr: any; isLive: boolean }) {
           {isLive ? '&#x25CF; live' : '&#x26A0; simulated'}
         </span>
       </div>
-      {attr.hypotheses.map((h: any, i: number) => {
+      {attr.hypotheses.map((h: Hypothesis, i: number) => {
         const confColor = h.confidence >= 0.7 ? C.yes : h.confidence >= 0.4 ? C.accent : C.muted;
         return (
           <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 10, padding: '16px 20px' }}>
