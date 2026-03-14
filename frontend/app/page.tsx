@@ -120,17 +120,7 @@ export default function MarketPage() {
       router.push(`/run/${run_id}`);
     } catch (err: any) {
       console.error('[Pythia] Failed to create run:', err);
-      // Fallback: navigate to old attribution route
-      setRun({
-        searchResults: localResults,
-        selectedMarket: localMarket,
-        prices: localPrices,
-        spikes: localSpikes,
-        selectedSpike: spike,
-        currentStage: 'attribution',
-        completedStages: new Set(['market'] as const),
-      });
-      router.push('/attribution');
+      setError(`Failed to start attribution: ${err.message}. Check that the backend is running.`);
     } finally {
       setIsCreatingRun(false);
     }

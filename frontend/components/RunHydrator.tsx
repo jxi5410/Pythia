@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, ReactNode } from 'react';
+import { useEffect, useState, useRef, ReactNode } from 'react';
 import { useRunStore, C, mono, serif } from '@/lib/run-store';
 
 interface RunHydratorProps {
@@ -12,24 +12,32 @@ export default function RunHydrator({ runId, children }: RunHydratorProps) {
   const { run, initRun } = useRunStore();
   const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
+  const initCalledRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (run.runId === runId && run.runStatus !== 'idle') {
+    // Already hydrated for this exact run
+    if (run.runId === runId && run.hydrated) {
       setStatus('ready');
       return;
     }
 
+    // Prevent duplicate calls for the same runId
+    if (initCalledRef.current === runId) return;
+    initCalledRef.current = runId;
+
     setStatus('loading');
+    setErrorMsg('');
+
     initRun(runId)
       .then(() => setStatus('ready'))
       .catch((err: any) => {
         setErrorMsg(err?.message || 'Failed to load run');
         setStatus('error');
       });
-  }, [runId]);
+  }, [runId, run.runId, run.hydrated, initRun]);
 
-  // Once store has the runId, show children
-  if (status === 'ready' || run.runId === runId) {
+  // Only render children when store is hydrated for THIS runId
+  if (run.runId === runId && run.hydrated && status === 'ready') {
     return <>{children}</>;
   }
 

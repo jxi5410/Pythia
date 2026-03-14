@@ -50,30 +50,6 @@ export default function NavHeader() {
         <span style={{ fontFamily: mono, fontSize: 11, color: C.muted, letterSpacing: 0.5 }}>
           BACKWARD ATTRIBUTION CAUSAL ENGINE
         </span>
-        {run.selectedMarket && (
-          <span style={{
-            fontFamily: mono, fontSize: 11, color: C.info,
-            marginLeft: 'auto',
-            maxWidth: 400,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap' as const,
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            {run.runId && (
-              <span style={{
-                fontSize: 9, padding: '1px 5px', borderRadius: 3,
-                background: run.runStatus === 'completed' ? '#eef3e8' : run.runStatus === 'running' ? '#fdf5ed' : C.faint,
-                color: run.runStatus === 'completed' ? C.yes : run.runStatus === 'running' ? C.accent : C.muted,
-                border: `1px solid ${run.runStatus === 'completed' ? C.yes + '40' : run.runStatus === 'running' ? C.accent + '40' : C.border}`,
-                flexShrink: 0,
-              }}>
-                {run.runId.slice(0, 8)}
-              </span>
-            )}
-            {run.selectedMarket.question.slice(0, 50)}{run.selectedMarket.question.length > 50 ? '\u2026' : ''}
-          </span>
-        )}
       </div>
 
       {/* Stage progress — minimal breadcrumb, not tabs */}

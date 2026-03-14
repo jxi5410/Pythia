@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useRunStore, C, mono, serif } from '@/lib/run-store';
 import ScenarioPanel from '@/components/ScenarioPanel';
+import { formatSpikeTimestamp } from '@/lib/run-presentation';
 
 export default function RunScenariosPage() {
   const router = useRouter();
@@ -38,7 +39,7 @@ export default function RunScenariosPage() {
                 Spike: <span style={{ color: run.selectedSpike.direction === 'up' ? C.accent : C.info, fontWeight: 700 }}>
                   {run.selectedSpike.direction === 'up' ? '+' : '-'}{(run.selectedSpike.magnitude * 100).toFixed(1)}%
                 </span>
-                {' '}at {new Date(run.selectedSpike.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {' '}at {formatSpikeTimestamp(run.selectedSpike.timestamp)}
                 {' \u00B7 '}{run.isLive ? <span style={{ color: C.yes }}>&#x25CF; Live attribution</span> : <span style={{ color: C.accent }}>&#x25CF; Simulated</span>}
               </div>
             )}

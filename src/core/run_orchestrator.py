@@ -785,7 +785,7 @@ class _SpikeAdapter:
 
         if spike_event:
             self.magnitude = spike_event.magnitude
-            self.timestamp = spike_event.detected_at.isoformat()
+            self.timestamp = meta.get("timestamp") or spike_event.detected_at.isoformat()
             self.direction = spike_event.spike_type.value
         else:
             self.magnitude = 0.0

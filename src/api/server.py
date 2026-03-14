@@ -222,13 +222,25 @@ class SpikeProxy:
 
 
 def _normalize_timestamp(ts_raw: str) -> str:
-    """Strip timezone to naive UTC."""
-    ts_raw = ts_raw.replace("Z", "+00:00")
+    """Return a canonical ISO 8601 timestamp, preserving UTC semantics."""
+    ts_raw = ts_raw.strip().replace("Z", "+00:00")
     try:
-        dt = datetime.fromisoformat(ts_raw).replace(tzinfo=None)
-        return dt.isoformat()
+        dt = datetime.fromisoformat(ts_raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
     except Exception:
         return ts_raw
+
+
+def _parse_spike_timestamp(ts_raw: str) -> datetime:
+    normalized = _normalize_timestamp(ts_raw)
+    try:
+        return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid timestamp: {ts_raw}") from exc
 
 
 # ─── LLM ──────────────────────────────────────────────────────────────
@@ -330,10 +342,11 @@ async def create_run(req: CreateRunRequest):
         market_id=UUID(req.market_id) if _is_uuid(req.market_id) else uuid4(),
         spike_type=SpikeType.UP if req.direction == "up" else SpikeType.DOWN,
         magnitude=req.magnitude,
+        detected_at=_parse_spike_timestamp(req.timestamp),
         threshold_used=0.0,
         metadata={
             "market_title": req.market_title,
-            "timestamp": req.timestamp,
+            "timestamp": _normalize_timestamp(req.timestamp),
             "price_before": req.price_before,
             "price_after": req.price_after,
             "volume_at_spike": req.volume_at_spike,
@@ -347,6 +360,7 @@ async def create_run(req: CreateRunRequest):
         bace_depth=req.depth,
         metadata={
             "market_title": req.market_title,
+            "timestamp": _normalize_timestamp(req.timestamp),
             "spike_event": spike_event.model_dump(mode="json"),
         },
     )

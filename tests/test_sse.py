@@ -384,6 +384,47 @@ class TestRunEndpoints:
         assert run is not None
         assert run.status == RunStatus.CREATED
 
+    def test_create_run_persists_spike_timestamp_for_hydration(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        with patch("src.api.server._get_repo", return_value=self.repo):
+            client = TestClient(app)
+            resp = client.post("/api/runs", json={
+                "market_title": "Will BTC hit 100k?",
+                "timestamp": "2025-01-15T12:00:00Z",
+                "direction": "up",
+                "magnitude": 0.15,
+                "price_before": 0.45,
+                "price_after": 0.60,
+                "depth": 2,
+            })
+
+        run = self.repo.get_run(resp.json()["run_id"])
+        assert run is not None
+        assert run.metadata["timestamp"] == "2025-01-15T12:00:00Z"
+        assert run.metadata["spike_event"]["metadata"]["timestamp"] == "2025-01-15T12:00:00Z"
+        assert run.metadata["spike_event"]["detected_at"] == "2025-01-15T12:00:00Z"
+
+    def test_create_run_rejects_invalid_timestamp(self):
+        from fastapi.testclient import TestClient
+        from src.api.server import app
+
+        with patch("src.api.server._get_repo", return_value=self.repo):
+            client = TestClient(app)
+            resp = client.post("/api/runs", json={
+                "market_title": "Will BTC hit 100k?",
+                "timestamp": "not-a-date",
+                "direction": "up",
+                "magnitude": 0.15,
+                "price_before": 0.45,
+                "price_after": 0.60,
+                "depth": 2,
+            })
+
+        assert resp.status_code == 422
+        assert "Invalid timestamp" in resp.json()["detail"]
+
     def test_get_run_not_found(self):
         from fastapi.testclient import TestClient
         from src.api.server import app

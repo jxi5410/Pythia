@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRunStore, C, mono, serif } from '@/lib/run-store';
 import BACEGraphAnimation from '@/components/BACEGraphAnimation';
+import { formatSpikeTimestamp } from '@/lib/run-presentation';
 
 export default function RunAttributionPage() {
   const router = useRouter();
   const { run } = useRunStore();
-  const [showContinue, setShowContinue] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -27,14 +27,9 @@ export default function RunAttributionPage() {
     return () => { if (elapsedRef.current) clearInterval(elapsedRef.current); };
   }, [run.isRunning]);
 
-  useEffect(() => {
-    if (run.attribution && !run.isRunning) {
-      setShowContinue(true);
-    }
-  }, [run.attribution, run.isRunning]);
-
   const spike = run.selectedSpike;
   const market = run.selectedMarket;
+  const showContinue = Boolean(run.attribution && !run.isRunning);
 
   return (
     <div style={{ minHeight: 'calc(100vh - 90px)', background: C.bg, fontFamily: serif, color: C.dark }}>
@@ -51,16 +46,16 @@ export default function RunAttributionPage() {
               <span style={{ color: spike.direction === 'up' ? C.accent : C.info, fontWeight: 700, fontSize: 14 }}>
                 {spike.direction === 'up' ? '+' : '-'}{(spike.magnitude * 100).toFixed(1)}%
               </span>
-              {' '}at {new Date(spike.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              {' '}at {formatSpikeTimestamp(spike.timestamp)}
               {' \u00B7 '}
             </>
           )}
           {run.isLive ? <span style={{ color: C.yes }}>&#x25CF; Live</span> : run.isRunning ? <span style={{ color: C.accent }}>&#x25CF; Running BACE depth 2 &#x2014; {elapsedSec}s</span> : <span style={{ color: C.muted }}>&#x25CF; Simulated</span>}
         </div>
 
-        {run.runStatus === 'error' && (
+        {(run.runStatus === 'error' || run.runStatus === 'failed') && (
           <div style={{ padding: '12px 16px', background: '#fdf0ed', borderRadius: 6, fontFamily: mono, fontSize: 12, color: C.accent, marginBottom: 16 }}>
-            Attribution failed. The backend may be unavailable.
+            {run.runError || 'Attribution failed. The backend may be unavailable.'}
           </div>
         )}
 
